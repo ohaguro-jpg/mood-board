@@ -252,6 +252,7 @@ const S = {
   cam: { x: 0, y: 0, k: 1 },
   cmpLayout: 'row',
   cmpFill: false,
+  mode: 'canvas',          // canvas（置いて考える）/ grid（ざっと眺める）
 };
 
 /* ========================== ホーム ======================================= */
@@ -352,12 +353,28 @@ async function openBoard(id) {
   $('#app-title').textContent = S.board.name;
   $('#board-sub').textContent = S.items.length + ' まい';
   $$('[data-boardonly]').forEach(el => el.hidden = false);
+  $('#btn-view').hidden = false;
+  let saved = 'canvas';
+  try { saved = localStorage.getItem('mb_mode') || 'canvas'; } catch (e) { }
+  S.mode = saved;
+  const grid = S.mode === 'grid';
+  $('#canvas-wrap').hidden = grid;
+  $('#grid-view').hidden = !grid;
+  $('#zoom-readout').hidden = grid;
+  $('#btn-view').classList.toggle('on', grid);
+  $('#btn-arrange').disabled = grid;
+  $('#btn-fit').disabled = grid;
+
   renderCanvas();
-  fitAll(true);
-  // 少しだけ引いた状態から寄せて、ふわっと広がって見せる
-  S.cam.k *= 0.9;
-  applyCam();
-  requestAnimationFrame(() => { fitAll(false); revealItems(); });
+  if (grid) {
+    renderGrid();
+  } else {
+    fitAll(true);
+    // 少しだけ引いた状態から寄せて、ふわっと広がって見せる
+    S.cam.k *= 0.9;
+    applyCam();
+    requestAnimationFrame(() => { fitAll(false); revealItems(); });
+  }
   // パレット用の色は裏でそっと用意する
   ensureColors(false).then(() => renderPalette());
 }
@@ -373,6 +390,8 @@ function goHome() {
   $('#board-sub').textContent = '';
   $$('[data-boardonly]').forEach(el => el.hidden = true);
   const pb = $('#palette'); if (pb) pb.hidden = true;
+  $('#zoom-readout').hidden = false;
+  $('#btn-view').hidden = true;
   setDock('board');
   renderHome();
 }
@@ -770,6 +789,7 @@ function updatePickUI() {
   });
   $('#select-count').textContent = S.picked.length + ' まい';
   $('#btn-compare-go').disabled = S.picked.length < 2;
+  if (S.mode === 'grid') syncGridPick();
 }
 
 /* ========================== くらべる ===================================== */
@@ -951,7 +971,7 @@ async function importFiles(files) {
   progClose();
   await touchBoard();
   $('#board-empty').hidden = S.items.length > 0;
-  fitAll();
+  if (S.mode === 'grid') renderGrid(); else fitAll();
   ensureColors(false).then(() => renderPalette());
   let msg = ok + ' 枚いれました';
   if (heic) {
@@ -1005,7 +1025,7 @@ async function importUrls(text) {
   progClose();
   await touchBoard();
   $('#board-empty').hidden = S.items.length > 0;
-  fitAll();
+  if (S.mode === 'grid') renderGrid(); else fitAll();
 
   let msg = ok + ' 枚を保存しました';
   if (dup) msg += '<br>' + dup + ' 枚は取り込み済みでした';
@@ -2254,3 +2274,82 @@ async function restoreAllTrash() {
   await openBoard(S.boardId);
   toast(trashed.length + ' 枚もどしました');
 }
+
+/* ==========================================================================
+   ざっと眺める表示（Pinterestのように隙間なく詰める）
+   キャンバスは「置いて考える」ため、こちらは「たくさん見る」ため。
+   ========================================================================== */
+function renderGrid() {
+  const box = $('#grid-scroll');
+  box.innerHTML = '';
+  // 新しく入れたものが上に来るほうが探しやすい
+  const list = [...S.items].sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || '') || (b.z || 0) - (a.z || 0));
+  list.forEach((it, n) => {
+    const rec = S.imgs.get(it.imageId);
+    const cell = document.createElement('div');
+    cell.className = 'gcell';
+    cell.dataset.id = it.id;
+    cell.style.setProperty('--dl', Math.min(n * 22, 420) + 'ms');
+    const im = document.createElement('img');
+    im.loading = 'lazy';
+    // 読み込み前に高さを確保して、がたつかせない
+    im.width = it.w; im.height = it.h;
+    if (rec) im.src = blobURL(rec.id, 't', rec.thumb || rec.full);
+    cell.appendChild(im);
+    if (it.note) {
+      const nt = document.createElement('div');
+      nt.className = 'gnote';
+      nt.textContent = it.note;
+      cell.appendChild(nt);
+    }
+    cell.onclick = () => {
+      if (S.picking) { togglePick(it.id); syncGridPick(); }
+      else openViewer(it);
+    };
+    box.appendChild(cell);
+  });
+  syncGridPick();
+}
+
+function syncGridPick() {
+  $$('#grid-scroll .gcell').forEach(cell => {
+    const idx = S.picked.indexOf(cell.dataset.id);
+    const badge = cell.querySelector('.gno');
+    if (idx >= 0) {
+      cell.classList.add('picked');
+      if (badge) badge.textContent = idx + 1;
+      else {
+        const b = document.createElement('div');
+        b.className = 'gno';
+        b.textContent = idx + 1;
+        cell.appendChild(b);
+      }
+    } else {
+      cell.classList.remove('picked');
+      if (badge) badge.remove();
+    }
+  });
+}
+
+function setViewMode(mode) {
+  S.mode = mode;
+  const grid = mode === 'grid';
+  $('#canvas-wrap').hidden = grid;
+  $('#grid-view').hidden = !grid;
+  $('#zoom-readout').hidden = grid;
+  $('#btn-view').classList.toggle('on', grid);
+  if (grid) {
+    selectItem(null);
+    renderGrid();
+  } else {
+    renderCanvas();
+    fitAll(true);
+    requestAnimationFrame(() => revealItems());
+  }
+  // 並べ替え系はキャンバスでしか意味がない
+  $('#btn-arrange').disabled = grid;
+  $('#btn-fit').disabled = grid;
+  try { localStorage.setItem('mb_mode', mode); } catch (e) { }
+}
+
+$('#btn-view').onclick = () => setViewMode(S.mode === 'grid' ? 'canvas' : 'grid');

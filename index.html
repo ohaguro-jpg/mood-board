@@ -25,6 +25,9 @@
       <h1 id="app-title">MOOD BOARD</h1>
       <span id="board-sub"></span>
     </div>
+    <button id="btn-view" class="icon-btn" aria-label="表示を切り替える" hidden>
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/></svg>
+    </button>
     <button id="btn-menu" class="icon-btn" aria-label="メニュー">
       <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
@@ -54,12 +57,13 @@
       <div id="canvas"></div>
       <div id="marquee" hidden></div>
     </div>
+    <div id="grid-view" hidden><div id="grid-scroll"></div></div>
+    <div id="palette" hidden></div>
     <div id="board-empty" class="empty floating" hidden>
       <p class="empty-big">からっぽ</p>
       <p class="empty-sub">下の ＋ から写真を入れます</p>
     </div>
     <div id="zoom-readout"><span id="zoom-val">100</span>%</div>
-    <div id="palette" hidden></div>
 
     <nav class="dock" id="board-dock">
       <button id="btn-add" class="dock-btn primary">

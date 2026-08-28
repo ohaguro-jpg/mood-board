@@ -44,6 +44,8 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
   border-radius:10px;color:var(--fg);
 }
 .icon-btn:active{background:var(--panel-2)}
+.icon-btn.on{background:var(--panel-2)}
+.icon-btn.on svg{stroke:var(--accent)}
 
 /* ---- views ---- */
 .view{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
@@ -318,7 +320,7 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
 
 /* ---- 色パレット ---- */
 #palette{
-  position:absolute;top:34px;right:10px;
+  position:absolute;top:34px;right:10px;z-index:12;
   display:flex;flex-direction:column;gap:3px;
   padding:5px;border-radius:7px;background:rgba(13,13,15,.66);
 }
@@ -356,3 +358,33 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
   font-size:.6rem;color:#fff;background:rgba(0,0,0,.42);letter-spacing:.06em;
 }
 .tr-cell button:active{background:rgba(0,0,0,.7)}
+
+/* ---- Pinterestのようにざっと眺める表示 ---- */
+#grid-view{
+  flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:10px 10px 24px;background:var(--bg);
+}
+#grid-scroll{column-count:2;column-gap:8px}
+@media(min-width:560px){#grid-scroll{column-count:3}}
+@media(min-width:860px){#grid-scroll{column-count:4}}
+@media(min-width:1200px){#grid-scroll{column-count:5}}
+.gcell{
+  break-inside:avoid;margin:0 0 8px;position:relative;
+  border-radius:10px;overflow:hidden;background:var(--panel-2);
+  animation:g-in .5s cubic-bezier(.16,1,.3,1) backwards;
+  animation-delay:var(--dl,0ms);
+}
+@keyframes g-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.gcell img{width:100%;display:block}
+.gcell .gnote{
+  position:absolute;left:0;right:0;bottom:0;padding:6px 8px;
+  background:linear-gradient(transparent,rgba(0,0,0,.85));
+  font-size:.66rem;line-height:1.4;color:#fff;
+  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+}
+.gcell.picked{outline:3px solid var(--ok);outline-offset:-3px}
+.gcell .gno{
+  position:absolute;top:6px;left:6px;min-width:22px;height:22px;border-radius:11px;
+  background:var(--ok);color:#06110b;font-size:.7rem;font-weight:700;
+  display:grid;place-items:center;padding:0 6px;
+}
