@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0d0d0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MOOD BOARD">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>MOOD BOARD</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ TOP BAR ============ -->
+  <header id="topbar">
+    <button id="btn-back" class="icon-btn" aria-label="もどる" hidden>
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <div id="title-wrap">
+      <h1 id="app-title">MOOD BOARD</h1>
+      <span id="board-sub"></span>
+    </div>
+    <button id="btn-menu" class="icon-btn" aria-label="メニュー">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+  </header>
+
+  <!-- ============ HOME : BOARD LIST ============ -->
+  <section id="view-home" class="view">
+    <div id="home-scroll">
+      <div id="board-grid"></div>
+      <div id="home-empty" class="empty" hidden>
+        <p class="empty-big">ボードがありません</p>
+        <p class="empty-sub">テーマごとに1枚つくって、<br>写真を放り込んでいきます。</p>
+      </div>
+      <div class="home-stats" id="home-stats"></div>
+    </div>
+    <nav class="dock">
+      <button id="btn-new-board" class="dock-btn primary">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        <span>あたらしいボード</span>
+      </button>
+    </nav>
+  </section>
+
+  <!-- ============ BOARD : CANVAS ============ -->
+  <section id="view-board" class="view" hidden>
+    <div id="canvas-wrap">
+      <div id="canvas"></div>
+      <div id="marquee" hidden></div>
+    </div>
+    <div id="board-empty" class="empty floating" hidden>
+      <p class="empty-big">からっぽ</p>
+      <p class="empty-sub">下の ＋ から写真を入れます</p>
+    </div>
+    <div id="zoom-readout"><span id="zoom-val">100</span>%</div>
+    <div id="palette" hidden></div>
+
+    <nav class="dock" id="board-dock">
+      <button id="btn-add" class="dock-btn primary">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        <span>いれる</span>
+      </button>
+      <button id="btn-select" class="dock-btn">
+        <svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
+        <span>みくらべ</span>
+      </button>
+      <button id="btn-arrange" class="dock-btn">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        <span>ならべる</span>
+      </button>
+      <button id="btn-fit" class="dock-btn">
+        <svg viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg>
+        <span>ぜんたい</span>
+      </button>
+    </nav>
+
+    <!-- selection mode dock -->
+    <nav class="dock" id="select-dock" hidden>
+      <button id="btn-select-cancel" class="dock-btn">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        <span>やめる</span>
+      </button>
+      <div id="select-count" class="select-count">0 まい</div>
+      <button id="btn-compare-go" class="dock-btn primary" disabled>
+        <svg viewBox="0 0 24 24"><path d="M4 4h7v16H4zM13 4h7v16h-7z"/></svg>
+        <span>くらべる</span>
+      </button>
+    </nav>
+
+    <!-- single item dock -->
+    <nav class="dock" id="item-dock" hidden>
+      <button id="btn-item-front" class="dock-btn">
+        <svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5zM3 14l9 5 9-5"/></svg>
+        <span>まえへ</span>
+      </button>
+      <button id="btn-item-big" class="dock-btn">
+        <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+        <span>大きく</span>
+      </button>
+      <button id="btn-item-note" class="dock-btn">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>
+        <span>メモ</span>
+      </button>
+      <button id="btn-item-move" class="dock-btn">
+        <svg viewBox="0 0 24 24"><path d="M8 8h12v12H8zM4 16V4h12"/></svg>
+        <span>うつす</span>
+      </button>
+      <button id="btn-item-remove" class="dock-btn danger">
+        <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>
+        <span>はずす</span>
+      </button>
+    </nav>
+  </section>
+
+</div>
+
+<!-- ============ COMPARE OVERLAY ============ -->
+<div id="compare" hidden>
+  <div id="compare-stage"></div>
+  <div id="compare-bar">
+    <button id="cmp-close" class="cmp-btn">とじる</button>
+    <div id="cmp-layouts">
+      <button class="cmp-btn lay" data-lay="row">よこ</button>
+      <button class="cmp-btn lay" data-lay="col">たて</button>
+      <button class="cmp-btn lay" data-lay="grid">格子</button>
+    </div>
+    <button id="cmp-fill" class="cmp-btn">切り抜き</button>
+  </div>
+</div>
+
+<!-- ============ VIEWER (single image full) ============ -->
+<div id="viewer" hidden>
+  <img id="viewer-img" alt="">
+  <div id="viewer-bar">
+    <button id="viewer-close" class="cmp-btn">とじる</button>
+    <div id="viewer-meta"></div>
+    <button id="viewer-save" class="cmp-btn">保存</button>
+  </div>
+</div>
+
+<!-- ============ SHEETS ============ -->
+<div id="scrim" hidden></div>
+
+<div class="sheet" id="sheet-add" hidden>
+  <div class="sheet-grab"></div>
+  <h2>いれる</h2>
+  <button class="row-btn" id="add-photos">
+    <svg viewBox="0 0 24 24"><path d="M3 6h4l2-2h6l2 2h4v14H3z"/><circle cx="12" cy="13" r="4"/></svg>
+    <span><b>スマホの写真から</b><i>まとめて選べます</i></span>
+  </button>
+  <button class="row-btn" id="add-url">
+    <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg>
+    <span><b>画像のURLから</b><i>何行でも貼り付けOK</i></span>
+  </button>
+  <button class="row-btn" id="add-pin">
+    <svg viewBox="0 0 24 24"><path d="M12 3a7 7 0 00-3 13l-2 5 5-3a7 7 0 000-15z"/></svg>
+    <span><b>Pinterestからまとめて</b><i>保存済みのピンを一気に。パソコンのChromeで</i></span>
+  </button>
+  <!-- image/* だとiOSがHEICのまま渡してくる。具体型を並べるとJPEGに変換して渡してくれる -->
+  <input type="file" id="file-input"
+         accept="image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif"
+         multiple hidden>
+</div>
+
+<div class="sheet tall" id="sheet-url" hidden>
+  <div class="sheet-grab"></div>
+  <h2>画像のURL</h2>
+  <p class="sheet-note">1行に1つ。何百行でも大丈夫です。取り込むと画像の実体がこの端末に保存されるので、元が消えても残ります。<br><b>Pinterestの画像はここでは取り込めません</b>（あちら側の制限）。ひとつ前の画面の「Pinterestからまとめて」を使ってください。</p>
+  <textarea id="url-input" placeholder="https://i.pinimg.com/originals/….jpg&#10;https://…"></textarea>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="url-cancel">やめる</button>
+    <button class="row-btn solid" id="url-go">取り込む</button>
+  </div>
+</div>
+
+<div class="sheet tall" id="sheet-pin" hidden>
+  <div class="sheet-grab"></div>
+  <h2>Pinterestからまとめて</h2>
+  <p class="sheet-note">Pinterestの画像は、<b>Pinterestのページの中からしか取り出せません</b>（そういう制限がかかっています）。なので、あちら側で一気にまとめてから持ち帰ります。<b>パソコンのChrome</b>で行ってください。</p>
+  <ol class="steps">
+    <li>Chromeで自分のボードを開く<br><i>pinterest.com/(自分のID)/(ボード名)/</i></li>
+    <li>下のコードをコピーして、<b>右クリック → 検証 → Console</b> に貼って Enter</li>
+    <li><b>あとは放っておく</b><br><i>勝手に最後までスクロールして集め、縮小して1つのZIPにまとめます。右下に進み具合が出ます。枚数が多いと数分かかります</i></li>
+    <li>ZIPが保存されたら、このアプリの <b>メニュー → ZIPから読み込む</b> に入れる<br><i>ボードの名前ごと、並んだ状態で復元されます</i></li>
+  </ol>
+  <pre id="pin-snippet">読み込み中…</pre>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="pin-close">とじる</button>
+    <button class="row-btn solid" id="pin-copy">コードをコピー</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheet-arrange" hidden>
+  <div class="sheet-grab"></div>
+  <h2>ならべかた</h2>
+  <button class="row-btn" id="arr-masonry">
+    <svg viewBox="0 0 24 24"><path d="M4 4h7v9H4zM13 4h7v6h-7zM4 15h7v5H4zM13 12h7v8h-7z"/></svg>
+    <span><b>すきまなく積む</b><i>大きさを揃えて、隙間なく詰める</i></span>
+  </button>
+  <button class="row-btn" id="arr-color">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16"/></svg>
+    <span><b>色の順にならべる</b><i>似た色味が隣り合うので、方向性が一目で分かる</i></span>
+  </button>
+  <div id="palette-big-wrap" hidden>
+    <div class="pal-label">このボードの色</div>
+    <div id="palette-big"></div>
+    <div class="pal-hint">色をタップするとコードをコピーします</div>
+  </div>
+</div>
+
+<div class="sheet tall" id="sheet-move" hidden>
+  <div class="sheet-grab"></div>
+  <h2>うつす</h2>
+  <p class="sheet-note">写真そのものは1つのまま、置き場所だけが増えます。容量は変わりません。</p>
+  <div class="pc-row"><label>やり方</label>
+    <div class="pc-opts" id="mv-mode">
+      <button class="chip on" data-v="move">移す</button>
+      <button class="chip" data-v="copy">コピー</button>
+    </div>
+  </div>
+  <div id="mv-boards"></div>
+  <button class="row-btn" id="mv-here">
+    <svg viewBox="0 0 24 24"><path d="M8 8h12v12H8zM4 16V4h12"/></svg>
+    <span><b>このボードの中で複製</b></span>
+  </button>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="mv-cancel">やめる</button>
+  </div>
+</div>
+
+<div class="sheet tall" id="sheet-trash" hidden>
+  <div class="sheet-grab"></div>
+  <h2>ゴミ箱</h2>
+  <p class="sheet-note">ボードから外した写真です。いつでも戻せます。<b>写真そのものは消えていません</b>。</p>
+  <div id="trash-grid"></div>
+  <div id="trash-empty" class="empty" hidden><p class="empty-sub">からっぽです</p></div>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="trash-close">とじる</button>
+    <button class="row-btn ghost" id="trash-restore-all">ぜんぶ戻す</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheet-menu" hidden>
+  <div class="sheet-grab"></div>
+  <h2>メニュー</h2>
+  <button class="row-btn" id="menu-export">
+    <svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 21h16"/></svg>
+    <span><b>まるごと書き出し</b><i>画像ごと1つのZIPに。これが本当のバックアップ</i></span>
+  </button>
+  <button class="row-btn" id="menu-usb">
+    <svg viewBox="0 0 24 24"><path d="M12 20V7"/><path d="M9 10L12 7l3 3"/><rect x="8" y="20" width="8" height="2" rx="1"/><circle cx="8" cy="12" r="1.4"/><path d="M16 12l2-2v-2"/></svg>
+    <span><b>USBに書き出す</b><i>挿したパソコンで、そのまま広げて見られる形にする</i></span>
+  </button>
+  <button class="row-btn" id="menu-png">
+    <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-5 5-3-3-5 5"/></svg>
+    <span><b>1枚の画像にして送る</b><i>LINEやメールでそのまま人に渡せます</i></span>
+  </button>
+  <button class="row-btn" id="menu-print">
+    <svg viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="4" y="9" width="16" height="7" rx="1"/><path d="M7 16h10v5H7z"/></svg>
+    <span><b>印刷する</b><i>ボードのまま / 格子 / 1枚ずつ</i></span>
+  </button>
+  <button class="row-btn" id="menu-import">
+    <svg viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M4 21h16"/></svg>
+    <span><b>ZIPから読み込む</b><i>別の端末や、書き出したファイルから復元</i></span>
+  </button>
+  <button class="row-btn" id="menu-trash" data-boardonly hidden>
+    <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/><path d="M12 11v6M9.5 13.5L12 11l2.5 2.5"/></svg>
+    <span><b>ゴミ箱</b><i>外した写真を戻せます</i></span>
+  </button>
+  <button class="row-btn" id="menu-rename" data-boardonly hidden>
+    <svg viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg>
+    <span><b>ボードの名前を変える</b></span>
+  </button>
+  <button class="row-btn" id="menu-delete-board" data-boardonly hidden>
+    <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>
+    <span><b>このボードを削除</b><i>写真そのものは他のボードに残ります</i></span>
+  </button>
+  <div class="menu-foot" id="menu-foot"></div>
+  <input type="file" id="zip-input" accept=".zip,application/zip" hidden>
+</div>
+
+<div class="sheet" id="sheet-print" hidden>
+  <div class="sheet-grab"></div>
+  <h2>印刷</h2>
+  <div class="pc-row"><label>レイアウト</label>
+    <div class="pc-opts" id="pc-mode">
+      <button class="chip on" data-v="board">ボードのまま</button>
+      <button class="chip" data-v="grid">格子に整列</button>
+      <button class="chip" data-v="one">1枚ずつ</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>用紙</label>
+    <div class="pc-opts" id="pc-paper">
+      <button class="chip on" data-v="a4p">A4 たて</button>
+      <button class="chip" data-v="a4l">A4 よこ</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>対象</label>
+    <div class="pc-opts" id="pc-scope">
+      <button class="chip on" data-v="all">ボード全部</button>
+      <button class="chip" data-v="picked">選んだものだけ</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>メモ</label>
+    <div class="pc-opts" id="pc-note">
+      <button class="chip on" data-v="on">入れる</button>
+      <button class="chip" data-v="off">入れない</button>
+    </div>
+  </div>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="print-cancel">やめる</button>
+    <button class="row-btn solid" id="print-go">印刷する</button>
+  </div>
+</div>
+
+<div id="paper" hidden></div>
+
+<!-- ============ PROGRESS / TOAST ============ -->
+<div id="progress" hidden>
+  <div class="prog-box">
+    <div class="prog-label" id="prog-label">取り込み中</div>
+    <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
+    <div class="prog-sub" id="prog-sub">0 / 0</div>
+    <button id="prog-cancel" class="cmp-btn">中止</button>
+  </div>
+</div>
+
+<div id="toast" hidden></div>
+
+<div id="prompt" hidden>
+  <div class="prompt-box">
+    <div class="prompt-title" id="prompt-title"></div>
+    <input type="text" id="prompt-input" autocomplete="off">
+    <textarea id="prompt-area" hidden></textarea>
+    <div class="prompt-actions">
+      <button class="cmp-btn" id="prompt-cancel">やめる</button>
+      <button class="cmp-btn solid" id="prompt-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

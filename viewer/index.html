@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOOD BOARD</title>
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+
+<div id="hud">
+  <div class="hud-left">
+    <div id="hud-title">MOOD BOARD</div>
+    <div id="hud-boards"></div>
+  </div>
+  <div class="hud-right">
+    <div class="readout"><label>PHOTOS</label><span id="ro-count">000</span></div>
+    <div class="readout"><label>ZOOM</label><span id="ro-zoom">100</span></div>
+    <div class="readout"><label>PICKED</label><span id="ro-pick">0</span></div>
+    <div id="v-palette"></div>
+  </div>
+</div>
+
+<div id="stage">
+  <div id="grid-bg"></div>
+  <div id="plane"></div>
+</div>
+
+<div id="bar">
+  <button class="b" id="b-fit" title="全体表示 (F)">FIT<em>F</em></button>
+  <button class="b" id="b-arrange" title="並べ直す (A)">ARRANGE<em>A</em></button>
+  <button class="b" id="b-color" title="色の順に並べる (S)">COLOR<em>S</em></button>
+  <button class="b" id="b-compare" disabled title="選んだものを比較 (C)">COMPARE<em>C</em></button>
+  <button class="b" id="b-clear" disabled title="選択解除 (Esc)">CLEAR<em>ESC</em></button>
+  <div class="spacer"></div>
+  <button class="b" id="b-print" title="印刷 (P)">PRINT<em>P</em></button>
+</div>
+
+<!-- 比較 -->
+<div id="cmp" hidden>
+  <div id="cmp-stage"></div>
+  <div id="cmp-bar">
+    <button class="b" id="cmp-close">CLOSE<em>ESC</em></button>
+    <button class="b lay on" data-lay="row">ROW</button>
+    <button class="b lay" data-lay="col">COL</button>
+    <button class="b lay" data-lay="grid">GRID</button>
+    <div class="spacer"></div>
+    <button class="b" id="cmp-fill">CROP</button>
+    <button class="b" id="cmp-print">PRINT</button>
+  </div>
+</div>
+
+<!-- 1枚 -->
+<div id="solo" hidden>
+  <img id="solo-img" alt="">
+  <div id="solo-meta"></div>
+  <button class="b" id="solo-close">CLOSE<em>ESC</em></button>
+</div>
+
+<!-- 印刷 -->
+<div id="printcfg" hidden>
+  <div class="pc-box">
+    <h2>PRINT</h2>
+    <div class="pc-row">
+      <label>レイアウト</label>
+      <div class="pc-opts" id="pc-mode">
+        <button class="b on" data-v="board">ボードのまま</button>
+        <button class="b" data-v="grid">格子に整列</button>
+        <button class="b" data-v="one">1枚ずつ</button>
+      </div>
+    </div>
+    <div class="pc-row">
+      <label>用紙</label>
+      <div class="pc-opts" id="pc-paper">
+        <button class="b on" data-v="a4p">A4 たて</button>
+        <button class="b" data-v="a4l">A4 よこ</button>
+      </div>
+    </div>
+    <div class="pc-row">
+      <label>対象</label>
+      <div class="pc-opts" id="pc-scope">
+        <button class="b on" data-v="all">ボード全部</button>
+        <button class="b" data-v="picked">選んだものだけ</button>
+      </div>
+    </div>
+    <div class="pc-row">
+      <label>メモ</label>
+      <div class="pc-opts" id="pc-note">
+        <button class="b on" data-v="on">入れる</button>
+        <button class="b" data-v="off">入れない</button>
+      </div>
+    </div>
+    <div class="pc-actions">
+      <button class="b" id="pc-cancel">CANCEL</button>
+      <button class="b solid" id="pc-go">PRINT</button>
+    </div>
+  </div>
+</div>
+
+<div id="paper" hidden></div>
+<div id="boot"><div id="boot-txt">MOOD BOARD</div></div>
+
+<script src="data.js"></script>
+<script src="viewer.js"></script>
+</body>
+</html>
