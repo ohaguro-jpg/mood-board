@@ -33,33 +33,74 @@
   let stopped = false;
   ui.querySelector('#mbg-stop').onclick = () => { stopped = true; msg.textContent = '止めています…'; };
 
-  /* ---------- 1) スクロールしながらURLを集める ---------- */
-  const urls = new Set();
-  const grab = () => document.querySelectorAll('img').forEach(img => {
-    let best = img.currentSrc || img.src || '';
-    if (img.srcset) {
-      let bw = 0;
-      img.srcset.split(',').forEach(s => {
-        const p = s.trim().split(/\s+/);
-        const n = parseFloat(p[1]) || 1;
-        if (n >= bw) { bw = n; best = p[0]; }
-      });
+  /* ---------- 1) スクロールしながらURLを集める ----------
+     ページ上の <img> を全部拾うと、ボードの下に出る「他のアイデア（おすすめ）」まで
+     一緒に取り込んでしまう。自分が保存したピンだけに絞るため、3つの条件で守る。
+       ① ピンのリンク（/pin/…）の中にある画像だけを見る（アバターやUIの画像を除く）
+       ② 「他のアイデア」の見出しより下にあるものは無視する
+       ③ ボードに表示されている件数に達したら、そこで打ち切る
+  */
+  const STOP_WORDS = /他のアイデア|関連(する)?(ピン|アイデア)|おすすめ|さらに表示|More (ideas|like this)|Related|You might also like/i;
+
+  // ②のための「ここから下はおすすめ」という境目を探す
+  const findStopNode = () => {
+    const cands = document.querySelectorAll('h1,h2,h3,h4,[role="heading"]');
+    for (const h of cands) {
+      const t = (h.textContent || '').trim();
+      if (t && t.length < 40 && STOP_WORDS.test(t)) return h;
     }
-    if (/i\.pinimg\.com/.test(best) && !/\/(30x30|60x60|75x75|140x140)\//.test(best)) urls.add(best);
-  });
+    return null;
+  };
+
+  // ③ ボードが「ピン：167件」と出しているので、その数を上限にする
+  const declaredCount = (() => {
+    const t = document.body.innerText || '';
+    const m = t.match(/ピン[\s:：]*([\d,]+)\s*件/) || t.match(/([\d,]+)\s*(?:件のピン|pins?)\b/i);
+    const n = m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  })();
+
+  const urls = new Set();
+  const grab = () => {
+    const stop = findStopNode();
+    document.querySelectorAll('a[href^="/pin/"] img, a[href*="/pin/"] img').forEach(img => {
+      // ② おすすめの見出しより後ろに現れたものは取らない
+      if (stop && (stop.compareDocumentPosition(img) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
+      let best = img.currentSrc || img.src || '';
+      if (img.srcset) {
+        let bw = 0;
+        img.srcset.split(',').forEach(s => {
+          const p = s.trim().split(/\s+/);
+          const n = parseFloat(p[1]) || 1;
+          if (n >= bw) { bw = n; best = p[0]; }
+        });
+      }
+      if (/i\.pinimg\.com/.test(best) && !/\/(30x30|60x60|75x75|140x140)\//.test(best)) urls.add(best);
+    });
+  };
 
   msg.textContent = '写真をさがしています';
+  sub.textContent = declaredCount ? ('このボードのピン ' + declaredCount + ' 件') : '';
   let lastH = 0, same = 0;
   while (same < 4 && !stopped) {
     grab();
-    sub.textContent = urls.size + ' 枚みつかりました';
+    sub.textContent = urls.size + ' 枚みつかりました'
+      + (declaredCount ? '（ボードのピン ' + declaredCount + ' 件）' : '');
+    // ③ ボードの件数に届いたら、そこから下は「おすすめ」なので打ち切る
+    if (declaredCount && urls.size >= declaredCount) break;
     window.scrollBy(0, window.innerHeight * 0.9);
     await new Promise(r => setTimeout(r, 850));
     if (document.body.scrollHeight === lastH) same++;
     else { same = 0; lastH = document.body.scrollHeight; }
   }
   grab();
-  const list = [...urls];
+  let list = [...urls];
+  // 念のため、件数を超えて拾っていたら先頭から件数ぶんだけ残す（DOMに現れた順＝ボードの並び順）
+  let trimmed = 0;
+  if (declaredCount && list.length > declaredCount) {
+    trimmed = list.length - declaredCount;
+    list = list.slice(0, declaredCount);
+  }
   if (!list.length) { msg.textContent = '写真が見つかりませんでした'; return; }
 
   /* ---------- 2) 取得して縮小する ---------- */
@@ -202,8 +243,10 @@
 
   bar.style.width = '100%';
   msg.innerHTML = '<b>' + got.length + ' 枚 まとめました</b>';
-  sub.innerHTML = mb + ' MB のZIPを保存しました。<br>MOOD BOARD の「ZIPから読み込む」に入れてください。' +
-    (failed ? '<br>（' + failed + ' 枚は取得できませんでした）' : '');
+  sub.innerHTML = mb + ' MB のZIPを保存しました。<br>MOOD BOARD の「ZIPから読み込む」に入れてください。'
+    + (declaredCount ? '<br>このボードのピンは ' + declaredCount + ' 件です' : '')
+    + (trimmed ? '<br>おすすめと思われる ' + trimmed + ' 枚は除きました' : '')
+    + (failed ? '<br>（' + failed + ' 枚は取得できませんでした）' : '');
   ui.querySelector('#mbg-stop').textContent = '閉じる';
   ui.querySelector('#mbg-stop').onclick = () => ui.remove();
   console.log('%cMOOD BOARD: ' + got.length + ' 枚を ' + mb + ' MB のZIPにまとめました',

@@ -10,6 +10,11 @@
   --ok:#4ad991;
   --dock-h:calc(64px + env(safe-area-inset-bottom));
   --top-h:calc(52px + env(safe-area-inset-top));
+  /* 盤面まわり（設定で変わる） */
+  --board-bg:#0d0d0f;
+  --board-dot:#22222a;
+  --board-fg:#ececed;
+  --item-shadow:0 6px 22px rgba(0,0,0,.55);
   font-size:16px;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -72,6 +77,12 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
 
 .empty{padding:56px 24px;text-align:center;color:var(--dim)}
 .empty.floating{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+/* 盤面の上に出る文字は、背景の明るさに合わせる */
+#board-empty .empty-big{color:var(--board-fg)}
+#board-empty .empty-sub{color:var(--board-fg);opacity:.55}
+/* 「動き：控えめ」 */
+body.calm .item.in,body.calm .item.in>img,body.calm .item.in>.broken,body.calm .gcell{animation:none}
+body.calm #canvas.smooth{transition:none}
 .empty-big{font-size:.92rem;font-weight:600;color:var(--fg);margin:0 0 8px}
 .empty-sub{font-size:.74rem;line-height:1.8;margin:0}
 
@@ -87,7 +98,7 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
   color:var(--dim);
 }
-.dock-btn span{font-size:.6rem;letter-spacing:.04em;white-space:nowrap}
+.dock-btn span{font-size:.66rem;letter-spacing:.02em;white-space:nowrap}
 .dock-btn:active{background:var(--panel-2)}
 .dock-btn.primary{color:var(--fg)}
 .dock-btn.primary svg{stroke:var(--accent);stroke-width:2}
@@ -95,14 +106,14 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
 .dock-btn.danger span{color:#ff8080}
 .dock-btn[disabled]{opacity:.32}
 .dock-btn.on{color:var(--fg);background:var(--panel-2)}
-.select-count{flex:1;text-align:center;font-size:.74rem;color:var(--dim);letter-spacing:.06em}
+.select-count{flex:0 0 auto;padding-inline:6px;text-align:center;font-size:.74rem;color:var(--dim);letter-spacing:.06em}
 
 /* ---- canvas ---- */
 #canvas-wrap{
   flex:1;min-height:0;position:relative;overflow:hidden;
   background:
-    radial-gradient(circle at 1px 1px, #22222a 1px, transparent 0) 0 0/26px 26px,
-    var(--bg);
+    radial-gradient(circle at 1px 1px, var(--board-dot) 1px, transparent 0) 0 0/26px 26px,
+    var(--board-bg);
   touch-action:none;
 }
 #canvas{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;will-change:transform}
@@ -128,9 +139,18 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
   transform-origin:0 0;
   will-change:transform;
   background:var(--panel-2);
-  box-shadow:0 6px 22px rgba(0,0,0,.55);
+  box-shadow:var(--item-shadow);
+  transition:opacity .25s ease,filter .25s ease;
 }
+.item.dim{opacity:.14;filter:grayscale(.5);pointer-events:none}
 .item img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;user-select:none;-webkit-user-drag:none}
+/* ---- 文字を置く（ノート） ---- */
+.item.text-item{background:#f4ecd0;box-shadow:0 6px 22px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.08) inset}
+.item.text-item .note-body{
+  position:absolute;inset:0;padding:14px 15px;overflow:hidden;
+  font-size:.78rem;line-height:1.6;color:#2a2415;
+  white-space:pre-wrap;word-break:break-word;
+}
 .item.sel{outline:1px solid rgba(255,90,54,.75);outline-offset:3px}
 .item.sel::before,.item.sel::after{
   content:"";position:absolute;width:14px;height:14px;pointer-events:none;
@@ -162,6 +182,18 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
 .handle::after{content:"";width:9px;height:9px;border-right:2px solid #fff;border-bottom:2px solid #fff}
 
 #marquee{position:absolute;border:1.5px solid var(--ok);background:rgba(74,217,145,.12);pointer-events:none;z-index:5}
+/* そろう位置に来たときに出る線 */
+.guide{position:absolute;background:var(--accent);pointer-events:none;z-index:6;opacity:.9}
+#guide-v{top:0;bottom:0;width:1px}
+#guide-h{left:0;right:0;height:1px}
+
+/* ---- 色見本 ---- */
+.item.color-item{background:#888}
+.sw-hex{
+  position:absolute;left:0;right:0;bottom:0;padding:7px 9px;
+  font:600 .62rem/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;
+}
+.gcell.gcolor{position:relative}
 
 #zoom-readout{
   position:absolute;top:8px;right:10px;
@@ -182,6 +214,17 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
 .cmp-cell .cell-note{
   position:absolute;left:0;right:0;bottom:0;padding:6px 8px;
   background:linear-gradient(transparent,rgba(0,0,0,.8));font-size:.66rem;color:#fff;
+}
+/* ---- くらべる：2枚を重ねてスライダーで比べる ---- */
+#compare-stage.overlay{display:block;position:relative;padding-top:env(safe-area-inset-top)}
+.ov-cell{position:relative;width:100%;height:100%;overflow:hidden;background:#000;touch-action:none}
+.ov-cell img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;background:#000}
+.ov-top-wrap{position:absolute;inset:0;overflow:hidden}
+.ov-handle{position:absolute;top:0;bottom:0;left:50%;width:2px;background:var(--accent);transform:translateX(-1px)}
+.ov-handle::after{
+  content:"";position:absolute;top:50%;left:50%;width:38px;height:38px;
+  transform:translate(-50%,-50%);border-radius:50%;background:var(--accent);
+  box-shadow:0 2px 10px rgba(0,0,0,.5);
 }
 #compare-bar,#viewer-bar{
   flex:0 0 auto;height:calc(56px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);
@@ -316,6 +359,19 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
   .p-one{display:flex;flex-direction:column;align-items:center;justify-content:center;height:88vh}
   .p-one img{max-width:100%;max-height:82vh;object-fit:contain}
   .p-one .pcap{margin-top:4mm;font-size:9pt;text-align:center}
+  .pi-text{background:#f4ecd0;overflow:hidden;box-sizing:border-box;padding:2mm 3mm}
+  .ptext-body{font-size:7pt;line-height:1.5;color:#2a2415;white-space:pre-wrap;word-break:break-word}
+  .p-one-text{width:100%;max-width:160mm;height:auto !important;min-height:60mm;background:#f4ecd0;padding:8mm;box-sizing:border-box}
+  .ptext-body.big{font-size:13pt;line-height:1.8}
+  #paper.gray{filter:grayscale(1)}
+  .pi-color{position:relative;overflow:hidden;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  .pcolor-hex{position:absolute;left:0;right:0;bottom:0;padding:1.5mm 2mm;font-size:6.5pt;font-family:ui-monospace,Menlo,monospace}
+  .p-one-color{height:auto !important}
+  .pcolor-big{
+    width:120mm;height:120mm;display:flex;align-items:flex-end;justify-content:center;
+    padding-bottom:6mm;font-size:12pt;font-family:ui-monospace,Menlo,monospace;
+    print-color-adjust:exact;-webkit-print-color-adjust:exact;
+  }
 }
 
 /* ---- 色パレット ---- */
@@ -358,11 +414,15 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
   font-size:.6rem;color:#fff;background:rgba(0,0,0,.42);letter-spacing:.06em;
 }
 .tr-cell button:active{background:rgba(0,0,0,.7)}
+.tr-cell .tr-text{
+  position:absolute;inset:0;padding:6px;background:#f4ecd0;color:#2a2415;
+  font-size:.56rem;line-height:1.4;overflow:hidden;white-space:pre-wrap;word-break:break-word;opacity:.7;
+}
 
 /* ---- Pinterestのようにざっと眺める表示 ---- */
 #grid-view{
   flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
-  padding:10px 10px 24px;background:var(--bg);
+  padding:10px 10px 24px;background:var(--board-bg);
 }
 #grid-scroll{column-count:2;column-gap:8px}
 @media(min-width:560px){#grid-scroll{column-count:3}}
@@ -383,8 +443,372 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
   overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
 }
 .gcell.picked{outline:3px solid var(--ok);outline-offset:-3px}
+.gcell.gtext{background:#f4ecd0;display:flex;align-items:flex-start;padding:11px}
+.gtext-body{
+  font-size:.72rem;line-height:1.6;color:#2a2415;
+  white-space:pre-wrap;word-break:break-word;overflow:hidden;max-height:100%;
+}
+
+/* ---- シートの入力欄（メモとタグ） ---- */
+.fld-label{display:block;font-size:.64rem;color:var(--dim);letter-spacing:.08em;margin:14px 0 5px}
+.fld-area{
+  width:100%;height:96px;min-height:96px;padding:11px 12px;border-radius:10px;
+  background:#0a0a0c;border:1px solid var(--line);color:var(--fg);
+  font-size:.8rem;line-height:1.7;resize:none;
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+}
+.fld-input{
+  width:100%;padding:12px;border-radius:10px;
+  background:#0a0a0c;border:1px solid var(--line);color:var(--fg);font-size:.8rem;
+}
+.fld-area:focus,.fld-input:focus,#search-input:focus{outline:none;border-color:var(--accent)}
+.print-count{text-align:center;margin:16px 0 0;font-size:.74rem}
+.print-count b{color:var(--accent)}
+.row-btn.danger{border:1px solid rgba(255,85,85,.4);background:rgba(255,85,85,.08);margin-top:14px}
+.row-btn.danger svg{stroke:#ff6b6b}
+.row-btn.danger b{color:#ff8080}
+
+/* ---- 色を置く ---- */
+.sw-btn{
+  width:64px;height:48px;border-radius:9px;margin:0 7px 7px 0;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);
+  font:600 .54rem/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;
+  display:inline-flex;align-items:flex-end;justify-content:center;padding-bottom:5px;
+}
+.sw-btn:active{opacity:.7}
+#color-board-pal{margin-top:8px}
+.color-pick-row{display:flex;gap:8px;align-items:center;margin-top:8px}
+.color-pick-row input[type=color]{
+  width:48px;height:40px;padding:0;border:1px solid var(--line);border-radius:9px;background:var(--panel-2);
+}
+.color-pick-row input[type=text]{
+  flex:1;min-width:0;padding:11px 12px;border-radius:9px;
+  background:#0a0a0c;border:1px solid var(--line);color:var(--fg);
+  font:.78rem ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+#viewer-pal{
+  position:absolute;left:0;right:0;bottom:calc(56px + env(safe-area-inset-bottom));
+  padding:12px 12px 6px;background:rgba(10,10,12,.94);border-top:1px solid #1e1e22;
+  display:flex;flex-wrap:wrap;justify-content:center;
+}
+
+/* ---- メニューの 元にもどす / やり直す ---- */
+.undo-row{display:flex;gap:8px;margin-top:4px}
+.undo-row .row-btn{flex:1;margin-top:0;justify-content:center;padding:12px}
+.undo-row .row-btn[disabled]{opacity:.3}
+
+/* ---- さがす ---- */
+#search-input{
+  width:100%;margin-top:4px;padding:12px 13px;border-radius:10px;
+  background:#0a0a0c;border:1px solid var(--line);color:var(--fg);font-size:.82rem;
+}
+#search-colors{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+#search-colors .sw{width:30px;height:30px;border-radius:8px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)}
+#search-colors .sw.on{box-shadow:0 0 0 2px var(--accent)}
+
+/* ---- 重複さがし ---- */
+#dup-groups{margin-top:10px}
+.dup-row{display:flex;gap:8px;overflow-x:auto;padding:6px 0;border-bottom:1px solid var(--line);margin-bottom:6px}
+.dup-cell{position:relative;flex:0 0 auto;width:84px;height:84px;border-radius:9px;overflow:hidden;background:var(--panel-2)}
+.dup-cell img{width:100%;height:100%;object-fit:cover;display:block}
+.dup-cell.keep{outline:2px solid var(--ok)}
+.dup-tag{
+  position:absolute;left:0;right:0;bottom:0;background:rgba(74,217,145,.9);
+  color:#06110b;font-size:.56rem;text-align:center;padding:2px 0;font-weight:700;
+}
+.dup-x{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.66);color:#fff;font-size:.56rem;text-align:center;padding:4px 0}
+.dup-x:active{background:rgba(255,90,54,.85)}
 .gcell .gno{
   position:absolute;top:6px;left:6px;min-width:22px;height:22px;border-radius:11px;
   background:var(--ok);color:#06110b;font-size:.7rem;font-weight:700;
   display:grid;place-items:center;padding:0 6px;
+}
+
+/* ---- USBとつなぐ ---- */
+.usb-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 14px}
+#usb-name{font-size:.76rem;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.usb-group{margin-bottom:18px}
+.usb-title{display:flex;align-items:center;gap:8px;font-size:.74rem;margin-bottom:9px}
+.usb-title b{font-weight:700}
+.dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.dot.in{background:var(--accent)}
+.dot.out{background:#f5c33b}
+.dot.ok{background:var(--ok)}
+.usb-thumbs{
+  display:grid;grid-template-columns:repeat(6,1fr);gap:5px;
+  margin-bottom:10px;max-height:24vh;overflow-y:auto;
+}
+.usb-thumbs img,.usb-thumbs .ph2{
+  width:100%;aspect-ratio:1/1;object-fit:cover;display:block;
+  border-radius:6px;background:var(--panel-2);
+}
+.usb-thumbs .more{
+  grid-column:1/-1;font-size:.64rem;color:var(--dim);text-align:center;padding:4px 0;
+}
+.usb-group .row-btn{margin-top:4px}
+
+/* ==========================================================================
+   見た目の仕上げ（Pinterest＝角丸と余白 / Apple＝やわらかい影と上品な文字）
+   既存の指定を上書きするため、ファイルの最後に置いている。
+   ========================================================================== */
+:root{
+  --radius-item:14px;      /* 盤面の写真。Pinterestのピンと同じくらい */
+  --radius-card:18px;      /* ボードのカード */
+  --ring:rgba(255,255,255,.10);   /* 1本線の代わりの、極細のふち */
+  /* 影は1枚でなく重ねる。遠くの影＋近くの影でやわらかく見える（Apple的） */
+  --item-shadow:0 1px 2px rgba(0,0,0,.28), 0 8px 24px rgba(0,0,0,.42);
+  --item-shadow-hover:0 2px 6px rgba(0,0,0,.30), 0 18px 44px rgba(0,0,0,.52);
+}
+
+/* ---- 盤面の写真 ---- */
+/* ※ overflow:hidden は使わない。選択枠の角マークとリサイズの取っ手が外側にあるため */
+.item{
+  border-radius:var(--radius-item);
+  transition:opacity .25s ease, filter .25s ease, box-shadow .22s ease, transform .22s ease;
+}
+.item>img,.item>.broken,.item .note-body{border-radius:var(--radius-item)}
+.item .note-tag{border-radius:0 0 var(--radius-item) var(--radius-item)}
+.item>img{box-shadow:inset 0 0 0 1px var(--ring)}
+
+/* 指では浮かせない（タップでちらつくため）。マウスのときだけ持ち上げる */
+@media (hover:hover) and (pointer:fine){
+  .item:not(.sel):not(.picked):hover{
+    box-shadow:var(--item-shadow-hover);
+    transform:translateY(-2px);
+  }
+  body.calm .item:hover{transform:none}
+}
+
+/* 選択中は、角マークではなく面で示す（Apple的にうるさくしない） */
+.item.sel{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--radius-item)}
+.item.sel::before,.item.sel::after{display:none}
+.item.picked{outline:3px solid var(--ok);outline-offset:2px}
+
+/* ---- ざっと眺める表示（Pinterestの並び） ---- */
+.gcell{border-radius:var(--radius-item);box-shadow:var(--item-shadow)}
+.gcell img{border-radius:var(--radius-item)}
+.gcell .gnote{border-radius:0 0 var(--radius-item) var(--radius-item)}
+@media (hover:hover) and (pointer:fine){
+  .gcell{transition:transform .2s cubic-bezier(.2,.8,.3,1), box-shadow .2s ease}
+  .gcell:hover{transform:translateY(-3px);box-shadow:var(--item-shadow-hover)}
+  body.calm .gcell:hover{transform:none}
+}
+
+/* ---- ボードのカード ---- */
+.board-card{
+  border-radius:var(--radius-card);
+  border:1px solid var(--ring);
+  box-shadow:0 1px 2px rgba(0,0,0,.2), 0 6px 18px rgba(0,0,0,.28);
+  transition:transform .2s cubic-bezier(.2,.8,.3,1), box-shadow .2s ease;
+}
+@media (hover:hover) and (pointer:fine){
+  .board-card:hover{transform:translateY(-3px);box-shadow:0 2px 6px rgba(0,0,0,.24), 0 16px 36px rgba(0,0,0,.4)}
+  body.calm .board-card:hover{transform:none}
+}
+.bc-name{font-size:.84rem;letter-spacing:.01em}
+
+/* ---- 上のバーと下のドック ---- */
+/* 盤面には重ねない方針なので、ぼかしではなく「極細のふち＋わずかな階調」で奥行きを出す */
+#topbar{
+  border-bottom:1px solid var(--ring);
+  background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0)) , var(--bg);
+}
+.dock{
+  border-top:1px solid var(--ring);
+  background:linear-gradient(0deg, rgba(255,255,255,.028), rgba(255,255,255,0)) , var(--panel);
+}
+
+/* ボード名は読み物として扱う。字間を詰めて、文字を大きく */
+#app-title{font-size:.95rem;font-weight:650;letter-spacing:.005em}
+#board-sub{font-size:.68rem;letter-spacing:.02em;opacity:.85}
+/* ホームだけはロゴとして字間を広げる */
+body.at-home #app-title{font-size:.82rem;font-weight:600;letter-spacing:.16em}
+
+.icon-btn{border-radius:11px;transition:background .16s ease}
+@media (hover:hover) and (pointer:fine){ .icon-btn:hover{background:var(--panel-2)} }
+
+.dock-btn{border-radius:13px;transition:background .16s ease, color .16s ease}
+.dock-btn span{font-size:.65rem;letter-spacing:.03em}
+@media (hover:hover) and (pointer:fine){ .dock-btn:not([disabled]):hover{background:var(--panel-2);color:var(--fg)} }
+
+/* ---- 右上のこまごま ---- */
+#zoom-readout{
+  border-radius:999px;padding:4px 9px;
+  background:rgba(20,20,24,.72);border:1px solid var(--ring);
+  font-variant-numeric:tabular-nums;
+}
+#palette{border-radius:999px;padding:6px;background:rgba(20,20,24,.72);border:1px solid var(--ring)}
+#palette .sw{width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 1px var(--ring)}
+#palette-big .sw{border-radius:12px}
+
+/* ---- 明るい盤面のときは、影とふちを弱める（白地で黒い輪郭が目立つため） ---- */
+body.board-white .item>img,body.board-paper .item>img{box-shadow:inset 0 0 0 1px rgba(0,0,0,.07)}
+body.board-white .gcell,body.board-paper .gcell{box-shadow:0 1px 2px rgba(0,0,0,.08), 0 6px 18px rgba(0,0,0,.10)}
+
+/* ---- 切り抜き ---- */
+#crop{position:fixed;inset:0;z-index:95;background:#000;display:flex;flex-direction:column}
+#crop-stage{
+  flex:1;min-height:0;position:relative;overflow:hidden;
+  display:grid;place-items:center;touch-action:none;user-select:none;
+}
+#crop-img{max-width:100%;max-height:100%;object-fit:contain;display:block;-webkit-user-drag:none}
+/* 外側を暗くして、選んだ中だけ明るく見せる */
+#crop-shade{position:absolute;inset:0;background:rgba(0,0,0,.62);pointer-events:none}
+#crop-box{
+  position:absolute;border:1.5px solid #fff;cursor:move;
+  box-shadow:0 0 0 9999px rgba(0,0,0,0);
+}
+/* 三分割の目安線（写真の構図を決めやすくする） */
+#crop-box::before,#crop-box::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+    linear-gradient(to right, transparent 33.33%, rgba(255,255,255,.28) 33.33%, rgba(255,255,255,.28) calc(33.33% + 1px), transparent calc(33.33% + 1px),
+                    transparent 66.66%, rgba(255,255,255,.28) 66.66%, rgba(255,255,255,.28) calc(66.66% + 1px), transparent calc(66.66% + 1px));
+}
+#crop-box::after{
+  background:
+    linear-gradient(to bottom, transparent 33.33%, rgba(255,255,255,.28) 33.33%, rgba(255,255,255,.28) calc(33.33% + 1px), transparent calc(33.33% + 1px),
+                    transparent 66.66%, rgba(255,255,255,.28) 66.66%, rgba(255,255,255,.28) calc(66.66% + 1px), transparent calc(66.66% + 1px));
+}
+#crop-box .ch{
+  position:absolute;width:26px;height:26px;cursor:pointer;
+}
+#crop-box .ch::after{
+  content:"";position:absolute;width:16px;height:16px;border:3px solid #fff;border-radius:2px;
+}
+#crop-box .ch[data-h="nw"]{left:-13px;top:-13px}
+#crop-box .ch[data-h="nw"]::after{left:5px;top:5px;border-right:none;border-bottom:none}
+#crop-box .ch[data-h="ne"]{right:-13px;top:-13px}
+#crop-box .ch[data-h="ne"]::after{right:5px;top:5px;border-left:none;border-bottom:none}
+#crop-box .ch[data-h="sw"]{left:-13px;bottom:-13px}
+#crop-box .ch[data-h="sw"]::after{left:5px;bottom:5px;border-right:none;border-top:none}
+#crop-box .ch[data-h="se"]{right:-13px;bottom:-13px}
+#crop-box .ch[data-h="se"]::after{right:5px;bottom:5px;border-left:none;border-top:none}
+#crop-bar{
+  flex:0 0 auto;height:calc(58px + env(safe-area-inset-bottom));
+  padding-bottom:env(safe-area-inset-bottom);
+  display:flex;align-items:center;justify-content:space-between;gap:8px;padding-inline:12px;
+  background:#0a0a0c;border-top:1px solid var(--ring);
+}
+#crop-ratios{display:flex;gap:6px}
+#crop-ratios .ratio{font-variant-numeric:tabular-nums}
+@media(max-width:560px){
+  #crop-ratios .ratio{padding:7px 9px;font-size:.66rem}
+  #crop-bar{gap:5px;padding-inline:8px}
+}
+
+/* 切り抜きの画像が縮まない問題への対処。
+   gridやflexの中では max-height:100% が「中身の高さ」基準になって効かないことがある。
+   絶対配置＋margin:auto にすると、親の大きさを基準に収まって中央にも来る。 */
+#crop-stage{display:block;position:relative}
+#crop-img{
+  position:absolute;inset:0;margin:auto;
+  max-width:100%;max-height:100%;width:auto;height:auto;
+}
+
+/* ==========================================================================
+   仕上げ 第2版
+   ・取っ手が写真の外に出ていて、掴もうとすると拡大になっていた問題を解消
+   ・下のボタンを、間延びした横並びから「中央にまとめた一群」へ
+     （Apple の道具バー、ラグジュアリー系の余白と抑制、Affinity の密度を参考）
+   ========================================================================== */
+
+/* ---- リサイズの取っ手：写真の内側へ入れる ---- */
+.handle{
+  right:3px;bottom:3px;width:22px;height:22px;
+  background:rgba(255,255,255,.96);
+  border:none;
+  box-shadow:0 1px 3px rgba(0,0,0,.4), 0 0 0 1px rgba(0,0,0,.12);
+}
+.handle::after{border-color:rgba(0,0,0,.55);width:7px;height:7px}
+/* 指では小さすぎると掴めないので、見た目は小さく当たり判定だけ広げる */
+.handle::before{content:"";position:absolute;inset:-9px}
+
+/* ---- 下のボタン群：中央にまとめる ---- */
+/* 盤面には重ねない方針は維持（バーは今まで通り流れの中にある） */
+.dock{justify-content:center;gap:0}
+.dock-btn{
+  flex:0 0 auto;min-width:64px;max-width:92px;height:46px;
+  padding:0 10px;border-radius:10px;
+  gap:4px;
+}
+.dock-btn svg{width:19px;height:19px;stroke-width:1.75}
+.dock-btn span{font-size:.62rem;letter-spacing:.04em;opacity:.78}
+.dock-btn.primary span{opacity:1}
+
+/* まとまりを示す薄い器。ボタンの帯が宙に浮かないようにする */
+#item-dock,#select-dock{gap:2px}
+#item-dock .dock-btn,#select-dock .dock-btn{min-width:60px}
+
+/* 選択中のドックだけは動詞が1つ多い（うつす/タグ/そろえる/印刷/くらべる/はずす）。
+   携帯の幅では固定幅のままだと入りきらず、両端が切れて押せなくなるので、
+   ここだけ伸び縮みする並びに切り替える */
+@media (max-width:430px){
+  #select-dock{gap:0;padding-inline:2px}
+  #select-dock .dock-btn{flex:1 1 0;min-width:0;max-width:none;padding:0 2px}
+  #select-dock .dock-btn span{font-size:.56rem;letter-spacing:0}
+  #select-dock .dock-btn.danger{margin-left:6px}
+  #select-dock .dock-btn.danger::before{left:-3px}
+  #btn-select-cancel{flex:0 0 34px;min-width:0}
+  #select-count{flex:0 0 auto;padding-inline:2px;font-size:.6rem}
+}
+
+/* 取り消し系は少し離して、色は抑える（押し間違いを減らす） */
+.dock-btn.danger{margin-left:14px;position:relative}
+.dock-btn.danger::before{
+  content:"";position:absolute;left:-8px;top:50%;transform:translateY(-50%);
+  width:1px;height:22px;background:var(--line);
+}
+.dock-btn.danger svg{stroke:var(--dim)}
+.dock-btn.danger span{color:var(--dim)}
+@media (hover:hover) and (pointer:fine){
+  .dock-btn.danger:hover svg{stroke:#ff6b5a}
+  .dock-btn.danger:hover span{color:#ff8f82}
+}
+
+/* 選んでいる最中の枚数表示を、数字が主役になるように */
+.select-count{
+  flex:0 0 auto;min-width:74px;text-align:center;
+  font-variant-numeric:tabular-nums;letter-spacing:.06em;
+  font-size:.72rem;color:var(--fg);
+}
+
+@media(max-width:560px){
+  .dock{gap:0;padding-inline:2px}
+  .dock-btn{min-width:0;flex:1 1 0;padding:0 2px}
+  .dock-btn.danger{margin-left:8px}
+  .dock-btn.danger::before{left:-4px}
+}
+
+/* 取っ手はズームの影響を打ち消すため逆向きに拡大している。
+   原点が中心だと、拡大したぶん写真の外へはみ出す。右下を固定して内側へ伸ばす。 */
+.handle{transform-origin:100% 100%}
+
+/* ---- タグと区分け：押すだけで付け外しできる形 ---- */
+.fld-label{display:flex;align-items:baseline;gap:8px}
+.fld-hint{font-style:normal;font-size:.62rem;color:var(--dim);font-weight:400;letter-spacing:0}
+.tag-row{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px;min-height:4px}
+.tag-row.suggest{margin-bottom:10px}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:7px 12px;border-radius:999px;
+  font-size:.72rem;line-height:1;white-space:nowrap;
+  border:1px solid var(--line);background:var(--panel-2);color:var(--dim);
+  transition:background .14s ease,color .14s ease,border-color .14s ease;
+}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#120603;font-weight:600}
+.chip.add{border-style:dashed;flex:0 0 auto}
+.chip .x{opacity:.6;font-size:.9em}
+@media (hover:hover) and (pointer:fine){ .chip:hover{border-color:var(--dim);color:var(--fg)} .chip.on:hover{color:#120603} }
+.tag-row.suggest .chip{background:transparent}
+.tag-add{display:flex;gap:7px;align-items:center;margin-top:4px}
+.tag-add .fld-input{flex:1;min-width:0}
+.tag-empty{font-size:.66rem;color:var(--dim);padding:4px 0}
+
+/* 区分けの見出し（盤面の上に置く文字。写真と一緒に動く） */
+.sec-label{
+  position:absolute;left:0;top:0;transform-origin:0 0;
+  font-size:30px;font-weight:650;letter-spacing:.01em;
+  color:var(--board-fg);opacity:.5;
+  white-space:nowrap;pointer-events:none;
 }

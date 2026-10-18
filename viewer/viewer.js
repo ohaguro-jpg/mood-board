@@ -64,6 +64,27 @@ function makeEl(it) {
   el.style.width = it.w + 'px';
   el.style.height = it.h + 'px';
   el.style.transform = 'translate(' + it.x + 'px,' + it.y + 'px)';
+
+  // 写真のない種別。文字カードと色見本も盤面に並ぶ
+  if (it.type === 'text') {
+    el.classList.add('ph-text');
+    const t = document.createElement('div');
+    t.className = 'ph-text-body';
+    t.textContent = it.text || '';
+    el.appendChild(t);
+    return el;
+  }
+  if (it.type === 'color') {
+    el.classList.add('ph-color');
+    const hex = it.hex || it.color || '';
+    el.style.background = hex || '#888';
+    const c = document.createElement('div');
+    c.className = 'ph-color-code';
+    c.textContent = hex.toUpperCase();
+    el.appendChild(c);
+    return el;
+  }
+
   const im = document.createElement('img');
   im.src = img ? img.file : '';
   im.alt = it.note || '';
@@ -293,16 +314,43 @@ stage.addEventListener('dblclick', (e) => {
   if (el) openSolo(el.dataset.id);
 });
 
-stage.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const r = stage.getBoundingClientRect();
-  const cx = e.clientX - r.left, cy = e.clientY - r.top;
+/* 2本指のスクロール＝動かす。ピンチと ⌘+ホイール＝拡大縮小。
+   トラックパッドの2本指スクロールもホイールとして飛んでくるため、
+   全部をズームにすると「動かそうとすると拡大する」状態になる。 */
+function zoomAt(cx, cy, k) {
   const wx = (cx - V.cam.x) / V.cam.k, wy = (cy - V.cam.y) / V.cam.k;
-  const k = clamp(V.cam.k * (e.deltaY < 0 ? 1.14 : 1 / 1.14), 0.04, 4);
   V.cam.k = k;
   V.cam.x = cx - wx * k;
   V.cam.y = cy - wy * k;
-  smooth(200);
+  applyCam();
+}
+
+/* Safari のトラックパッドのピンチはWebKit独自のイベントで来る */
+let gesture0 = null;
+stage.addEventListener('gesturestart', (e) => {
+  e.preventDefault();
+  const r = stage.getBoundingClientRect();
+  gesture0 = { k: V.cam.k, cx: e.clientX - r.left, cy: e.clientY - r.top };
+});
+stage.addEventListener('gesturechange', (e) => {
+  e.preventDefault();
+  if (!gesture0) return;
+  zoomAt(gesture0.cx, gesture0.cy, clamp(gesture0.k * e.scale, 0.04, 4));
+});
+stage.addEventListener('gestureend', (e) => { e.preventDefault(); gesture0 = null; });
+
+stage.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (gesture0) return;
+  stopGlide();
+  if (e.ctrlKey || e.metaKey) {
+    const r = stage.getBoundingClientRect();
+    const d = clamp(e.deltaY, -50, 50);
+    zoomAt(e.clientX - r.left, e.clientY - r.top, clamp(V.cam.k * Math.exp(-d * 0.006), 0.04, 4));
+    return;
+  }
+  V.cam.x -= e.deltaX;
+  V.cam.y -= e.deltaY;
   applyCam();
 }, { passive: false });
 

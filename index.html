@@ -28,6 +28,9 @@
     <button id="btn-view" class="icon-btn" aria-label="表示を切り替える" hidden>
       <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/></svg>
     </button>
+    <button id="btn-settings" class="icon-btn" aria-label="設定">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6L18 18M18 6l-1.4 1.4M7.4 16.6L6 18"/></svg>
+    </button>
     <button id="btn-menu" class="icon-btn" aria-label="メニュー">
       <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
@@ -56,6 +59,8 @@
     <div id="canvas-wrap">
       <div id="canvas"></div>
       <div id="marquee" hidden></div>
+      <div id="guide-v" class="guide" hidden></div>
+      <div id="guide-h" class="guide" hidden></div>
     </div>
     <div id="grid-view" hidden><div id="grid-scroll"></div></div>
     <div id="palette" hidden></div>
@@ -70,9 +75,13 @@
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
         <span>いれる</span>
       </button>
+      <button id="btn-search" class="dock-btn">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <span>さがす</span>
+      </button>
       <button id="btn-select" class="dock-btn">
         <svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
-        <span>みくらべ</span>
+        <span>えらぶ</span>
       </button>
       <button id="btn-arrange" class="dock-btn">
         <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -91,9 +100,29 @@
         <span>やめる</span>
       </button>
       <div id="select-count" class="select-count">0 まい</div>
+      <button id="btn-bulk-move" class="dock-btn" disabled>
+        <svg viewBox="0 0 24 24"><path d="M8 8h12v12H8zM4 16V4h12"/></svg>
+        <span>うつす</span>
+      </button>
+      <button id="btn-bulk-tag" class="dock-btn" disabled>
+        <svg viewBox="0 0 24 24"><path d="M3 11V5a2 2 0 012-2h6l10 10-8 8z"/><circle cx="7.5" cy="7.5" r="1.3"/></svg>
+        <span>タグ</span>
+      </button>
+      <button id="btn-bulk-align" class="dock-btn" disabled>
+        <svg viewBox="0 0 24 24"><path d="M4 4v16"/><rect x="8" y="6" width="11" height="4" rx="1"/><rect x="8" y="14" width="7" height="4" rx="1"/></svg>
+        <span>そろえる</span>
+      </button>
+      <button id="btn-bulk-print" class="dock-btn" disabled>
+        <svg viewBox="0 0 24 24"><path d="M7 9V4h10v5M7 18H5v-6h14v6h-2M8 15h8v5H8z"/></svg>
+        <span>印刷</span>
+      </button>
       <button id="btn-compare-go" class="dock-btn primary" disabled>
         <svg viewBox="0 0 24 24"><path d="M4 4h7v16H4zM13 4h7v16h-7z"/></svg>
         <span>くらべる</span>
+      </button>
+      <button id="btn-bulk-trash" class="dock-btn danger" disabled>
+        <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>
+        <span>はずす</span>
       </button>
     </nav>
 
@@ -133,6 +162,7 @@
       <button class="cmp-btn lay" data-lay="row">よこ</button>
       <button class="cmp-btn lay" data-lay="col">たて</button>
       <button class="cmp-btn lay" data-lay="grid">格子</button>
+      <button class="cmp-btn lay" data-lay="overlay">かさねる</button>
     </div>
     <button id="cmp-fill" class="cmp-btn">切り抜き</button>
   </div>
@@ -144,7 +174,35 @@
   <div id="viewer-bar">
     <button id="viewer-close" class="cmp-btn">とじる</button>
     <div id="viewer-meta"></div>
+    <button id="viewer-rotate" class="cmp-btn">まわす</button>
+    <button id="viewer-crop" class="cmp-btn">切り抜く</button>
+    <button id="viewer-uncrop" class="cmp-btn" hidden>元の形に</button>
+    <button id="viewer-colors" class="cmp-btn">色をとる</button>
     <button id="viewer-save" class="cmp-btn">保存</button>
+  </div>
+  <div id="viewer-pal" hidden></div>
+</div>
+
+<!-- ============ 切り抜き ============ -->
+<div id="crop" hidden>
+  <div id="crop-stage">
+    <img id="crop-img" alt="">
+    <div id="crop-shade"></div>
+    <div id="crop-box">
+      <i class="ch" data-h="nw"></i><i class="ch" data-h="ne"></i>
+      <i class="ch" data-h="sw"></i><i class="ch" data-h="se"></i>
+    </div>
+  </div>
+  <div id="crop-bar">
+    <button id="crop-cancel" class="cmp-btn">やめる</button>
+    <div id="crop-ratios">
+      <button class="cmp-btn ratio on" data-r="free">自由</button>
+      <button class="cmp-btn ratio" data-r="1">1:1</button>
+      <button class="cmp-btn ratio" data-r="0.8">4:5</button>
+      <button class="cmp-btn ratio" data-r="0.667">2:3</button>
+    </div>
+    <button id="crop-reset" class="cmp-btn">ぜんぶ</button>
+    <button id="crop-ok" class="cmp-btn solid">切り抜く</button>
   </div>
 </div>
 
@@ -165,6 +223,14 @@
   <button class="row-btn" id="add-pin">
     <svg viewBox="0 0 24 24"><path d="M12 3a7 7 0 00-3 13l-2 5 5-3a7 7 0 000-15z"/></svg>
     <span><b>Pinterestからまとめて</b><i>保存済みのピンを一気に。パソコンのChromeで</i></span>
+  </button>
+  <button class="row-btn" id="add-color">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 000 16"/></svg>
+    <span><b>色を置く</b><i>このボードの色や、好きな色を見本として並べます</i></span>
+  </button>
+  <button class="row-btn" id="add-text">
+    <svg viewBox="0 0 24 24"><path d="M4 4h16M4 4v16h16V4M8 8h8M8 12h8M8 16h5"/></svg>
+    <span><b>文字を置く</b><i>気づいたことを、ノートのように書き込めます</i></span>
   </button>
   <!-- image/* だとiOSがHEICのまま渡してくる。具体型を並べるとJPEGに変換して渡してくれる -->
   <input type="file" id="file-input"
@@ -211,6 +277,10 @@
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16"/></svg>
     <span><b>色の順にならべる</b><i>似た色味が隣り合うので、方向性が一目で分かる</i></span>
   </button>
+  <button class="row-btn" id="arr-section">
+    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1"/><rect x="3" y="14" width="18" height="6" rx="1"/></svg>
+    <span><b>区分けごとにまとめる</b><i>「素材」「照明」などの区分けごとに、見出しを付けて段に分ける</i></span>
+  </button>
   <div id="palette-big-wrap" hidden>
     <div class="pal-label">このボードの色</div>
     <div id="palette-big"></div>
@@ -248,11 +318,25 @@
     <button class="row-btn ghost" id="trash-close">とじる</button>
     <button class="row-btn ghost" id="trash-restore-all">ぜんぶ戻す</button>
   </div>
+  <button class="row-btn danger" id="trash-empty-all" hidden>
+    <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>
+    <span><b>ゴミ箱を空にする</b><i>写真の実体ごと完全に消して、容量を空けます。<b>戻せません</b></i></span>
+  </button>
 </div>
 
 <div class="sheet" id="sheet-menu" hidden>
   <div class="sheet-grab"></div>
   <h2>メニュー</h2>
+  <div class="undo-row">
+    <button class="row-btn ghost" id="menu-undo" disabled>
+      <svg viewBox="0 0 24 24"><path d="M9 14l-5-5 5-5"/><path d="M4 9h9a6 6 0 010 12h-3"/></svg>
+      <span><b>元にもどす</b></span>
+    </button>
+    <button class="row-btn ghost" id="menu-redo" disabled>
+      <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9h-9a6 6 0 000 12h3"/></svg>
+      <span><b>やり直す</b></span>
+    </button>
+  </div>
   <button class="row-btn" id="menu-export">
     <svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 21h16"/></svg>
     <span><b>まるごと書き出し</b><i>画像ごと1つのZIPに。これが本当のバックアップ</i></span>
@@ -261,9 +345,17 @@
     <svg viewBox="0 0 24 24"><path d="M12 20V7"/><path d="M9 10L12 7l3 3"/><rect x="8" y="20" width="8" height="2" rx="1"/><circle cx="8" cy="12" r="1.4"/><path d="M16 12l2-2v-2"/></svg>
     <span><b>USBに書き出す</b><i>挿したパソコンで、そのまま広げて見られる形にする</i></span>
   </button>
+  <button class="row-btn" id="menu-usb-sync">
+    <svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M9 6l3-3 3 3"/><rect x="9" y="19" width="6" height="2" rx="1"/><path d="M12 12v7"/><path d="M4 14a8 8 0 0016 0"/></svg>
+    <span><b>USBとつなぐ</b><i>USBと突き合わせて、まだ無い写真だけやりとりする</i></span>
+  </button>
   <button class="row-btn" id="menu-png">
     <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-5 5-3-3-5 5"/></svg>
     <span><b>1枚の画像にして送る</b><i>LINEやメールでそのまま人に渡せます</i></span>
+  </button>
+  <button class="row-btn" id="menu-pdf">
+    <svg viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/><path d="M9 13h6M9 17h4"/></svg>
+    <span><b>PDFにして送る</b><i>人に渡す用。1枚にまとめる / 1枚ずつ</i></span>
   </button>
   <button class="row-btn" id="menu-print">
     <svg viewBox="0 0 24 24"><path d="M7 9V3h10v6"/><rect x="4" y="9" width="16" height="7" rx="1"/><path d="M7 16h10v5H7z"/></svg>
@@ -272,6 +364,10 @@
   <button class="row-btn" id="menu-import">
     <svg viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M4 21h16"/></svg>
     <span><b>ZIPから読み込む</b><i>別の端末や、書き出したファイルから復元</i></span>
+  </button>
+  <button class="row-btn" id="menu-dup">
+    <svg viewBox="0 0 24 24"><rect x="4" y="4" width="12" height="12" rx="2"/><rect x="9" y="9" width="12" height="12" rx="2"/></svg>
+    <span><b>重複をさがす</b><i>似た写真をまとめて、ゴミ箱へ整理できます</i></span>
   </button>
   <button class="row-btn" id="menu-trash" data-boardonly hidden>
     <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/><path d="M12 11v6M9.5 13.5L12 11l2.5 2.5"/></svg>
@@ -303,6 +399,24 @@
     <div class="pc-opts" id="pc-paper">
       <button class="chip on" data-v="a4p">A4 たて</button>
       <button class="chip" data-v="a4l">A4 よこ</button>
+      <button class="chip" data-v="a3p">A3 たて</button>
+      <button class="chip" data-v="a3l">A3 よこ</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>余白</label>
+    <div class="pc-opts" id="pc-margin">
+      <button class="chip" data-v="narrow">せまい</button>
+      <button class="chip on" data-v="normal">ふつう</button>
+      <button class="chip" data-v="wide">ひろい</button>
+    </div>
+  </div>
+  <div class="pc-row" id="pc-cols-row"><label>1行に</label>
+    <div class="pc-opts" id="pc-cols">
+      <button class="chip on" data-v="auto">おまかせ</button>
+      <button class="chip" data-v="2">2枚</button>
+      <button class="chip" data-v="3">3枚</button>
+      <button class="chip" data-v="4">4枚</button>
+      <button class="chip" data-v="5">5枚</button>
     </div>
   </div>
   <div class="pc-row"><label>対象</label>
@@ -317,9 +431,226 @@
       <button class="chip" data-v="off">入れない</button>
     </div>
   </div>
+  <div class="pc-row"><label>色</label>
+    <div class="pc-opts" id="pc-gray">
+      <button class="chip on" data-v="off">そのまま</button>
+      <button class="chip" data-v="on">白黒</button>
+    </div>
+  </div>
+  <p class="sheet-note print-count" id="print-count"></p>
   <div class="sheet-actions">
     <button class="row-btn ghost" id="print-cancel">やめる</button>
+    <button class="row-btn" id="pdf-go">PDFにする</button>
     <button class="row-btn solid" id="print-go">印刷する</button>
+  </div>
+</div>
+
+<div class="sheet tall" id="sheet-usb" hidden>
+  <div class="sheet-grab"></div>
+  <h2>USBとつなぐ</h2>
+  <div id="usb-intro">
+    <p class="sheet-note">USBの中の <b>MOOD BOARD</b> フォルダと突き合わせて、<b>まだ無い写真だけ</b>をやりとりします。写真そのものはUSBに残るので、別の端末でも同じものを取り込めます。</p>
+    <button class="row-btn solid" id="usb-pick">USBを選ぶ</button>
+    <button class="row-btn" id="usb-reconnect" hidden>
+      <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0113.7-5.7L20 8"/><path d="M20 4v4h-4"/></svg>
+      <span><b>前回のUSBにつなぐ</b><i id="usb-last"></i></span>
+    </button>
+    <p class="sheet-note" id="usb-unsupported" hidden><b>このブラウザではフォルダに直接つなげません。</b><br>パソコンのChromeかEdgeでお使いください。iPhoneの場合は「まるごと書き出し」のZIPでやりとりしてください。</p>
+  </div>
+
+  <div id="usb-panel" hidden>
+    <div class="usb-head">
+      <div id="usb-name"></div>
+      <button class="chip" id="usb-refresh">調べ直す</button>
+    </div>
+
+    <div class="usb-group" id="usb-pull-group" hidden>
+      <div class="usb-title"><span class="dot in"></span><b id="usb-pull-n"></b> この端末にまだ無い写真</div>
+      <div class="usb-thumbs" id="usb-pull-thumbs"></div>
+      <button class="row-btn solid" id="usb-pull">この端末に取り込む</button>
+    </div>
+
+    <div class="usb-group" id="usb-push-group" hidden>
+      <div class="usb-title"><span class="dot out"></span><b id="usb-push-n"></b> USBにまだ無い写真</div>
+      <div class="usb-thumbs" id="usb-push-thumbs"></div>
+      <button class="row-btn solid" id="usb-push">USBに保存する</button>
+    </div>
+
+    <div class="usb-group" id="usb-same-group" hidden>
+      <div class="usb-title"><span class="dot ok"></span><b id="usb-same-n"></b> 両方にある（保存済み）</div>
+    </div>
+
+    <div id="usb-empty" class="empty" hidden><p class="empty-sub">USBに MOOD BOARD フォルダがありません。<br>「USBに保存する」で作られます。</p></div>
+  </div>
+
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="usb-close">とじる</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheet-note" hidden>
+  <div class="sheet-grab"></div>
+  <h2 id="note-title">この1枚について</h2>
+  <p class="sheet-note" id="note-scope">写真の下に出るのは「ひとこと」だけ。あとは「さがす」で使えます。</p>
+
+  <label class="fld-label" for="note-body">ひとこと<i class="fld-hint">写真の下に出る</i></label>
+  <input type="text" id="note-body" class="fld-input" placeholder="金具の感じ" autocomplete="off">
+
+  <label class="fld-label" for="note-desc">説明<i class="fld-hint">長く書きたいとき</i></label>
+  <textarea id="note-desc" class="fld-area" placeholder="どこが良いのか、どう使うつもりか。あとで自分が読んで分かるように。"></textarea>
+
+  <label class="fld-label">タグ<i class="fld-hint">押すだけで付け外しできる</i></label>
+  <div id="tag-picked" class="tag-row"></div>
+  <div id="tag-suggest" class="tag-row suggest"></div>
+  <div class="tag-add">
+    <input type="text" id="note-tags" class="fld-input" placeholder="新しいタグを打って Enter" autocomplete="off">
+    <button class="chip add" id="tag-add-btn">追加</button>
+  </div>
+
+  <label class="fld-label">区分け<i class="fld-hint">ボードの中をグループに分ける</i></label>
+  <div id="sec-picked" class="tag-row"></div>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="note-cancel">やめる</button>
+    <button class="row-btn solid" id="note-save">保存</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheet-align" hidden>
+  <div class="sheet-grab"></div>
+  <h2>そろえる</h2>
+  <p class="sheet-note">選んだ <b id="align-n">0</b> 枚をきれいに並べ直します。</p>
+  <div class="pc-row"><label>よこ</label>
+    <div class="pc-opts">
+      <button class="chip" data-align="left">左</button>
+      <button class="chip" data-align="cx">中央</button>
+      <button class="chip" data-align="right">右</button>
+      <button class="chip" data-align="distx">等間隔</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>たて</label>
+    <div class="pc-opts">
+      <button class="chip" data-align="top">上</button>
+      <button class="chip" data-align="cy">中央</button>
+      <button class="chip" data-align="bottom">下</button>
+      <button class="chip" data-align="disty">等間隔</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>大きさ</label>
+    <div class="pc-opts">
+      <button class="chip" data-align="samew">幅をそろえる</button>
+      <button class="chip" data-align="sameh">高さをそろえる</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>まとめて</label>
+    <div class="pc-opts">
+      <button class="chip" data-align="row">横一列</button>
+      <button class="chip" data-align="col">縦一列</button>
+      <button class="chip" data-align="stack">重ねる</button>
+    </div>
+  </div>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="align-close">とじる</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheet-color" hidden>
+  <div class="sheet-grab"></div>
+  <h2>色を置く</h2>
+  <p class="sheet-note">色見本として盤面に置きます。写真と一緒に並べると、配色の方向性が決めやすくなります。</p>
+  <div class="pal-label">このボードの色</div>
+  <div id="color-board-pal"></div>
+  <div class="pal-label" style="margin-top:16px">好きな色</div>
+  <div class="color-pick-row">
+    <input type="color" id="color-input" value="#c8b8a0">
+    <input type="text" id="color-hex" placeholder="#RRGGBB" autocomplete="off" spellcheck="false">
+    <button class="chip" id="color-add">置く</button>
+  </div>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="color-close">とじる</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheet-settings" hidden>
+  <div class="sheet-grab"></div>
+  <h2>設定</h2>
+  <div class="pc-row"><label>背景</label>
+    <div class="pc-opts" id="st-bg">
+      <button class="chip on" data-v="black">くろ</button>
+      <button class="chip" data-v="gray">グレー</button>
+      <button class="chip" data-v="white">しろ</button>
+      <button class="chip" data-v="paper">紙</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>ドット</label>
+    <div class="pc-opts" id="st-dots">
+      <button class="chip on" data-v="on">あり</button>
+      <button class="chip" data-v="off">なし</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>影</label>
+    <div class="pc-opts" id="st-shadow">
+      <button class="chip on" data-v="on">あり</button>
+      <button class="chip" data-v="off">なし</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>すきま</label>
+    <div class="pc-opts" id="st-gap">
+      <button class="chip" data-v="tight">つめる</button>
+      <button class="chip on" data-v="normal">ふつう</button>
+      <button class="chip" data-v="loose">ひろく</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>文字の大きさ</label>
+    <div class="pc-opts" id="st-font">
+      <button class="chip on" data-v="normal">ふつう</button>
+      <button class="chip" data-v="large">大きい</button>
+      <button class="chip" data-v="xlarge">もっと大きい</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>スナップ</label>
+    <div class="pc-opts" id="st-snap">
+      <button class="chip on" data-v="on">そろえる</button>
+      <button class="chip" data-v="off">自由</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>2本指</label>
+    <div class="pc-opts" id="st-wheel">
+      <button class="chip on" data-v="pan">動かす</button>
+      <button class="chip" data-v="zoom">拡大する</button>
+    </div>
+  </div>
+  <div class="pc-row"><label>動き</label>
+    <div class="pc-opts" id="st-motion">
+      <button class="chip on" data-v="smooth">なめらか</button>
+      <button class="chip" data-v="calm">控えめ</button>
+    </div>
+  </div>
+  <p class="sheet-note">パソコンでは <b>2本指のスクロールで動かす</b>、<b>ピンチ（または ⌘＋スクロール）で拡大</b>。<br><b>F</b>＝ぜんたい・<b>A</b>＝ならべる・<b>Delete</b>＝はずす。<br>背景と影は「1枚の画像にして送る」にも反映されます。</p>
+  <div class="sheet-actions">
+    <button class="row-btn solid" id="settings-close">とじる</button>
+  </div>
+</div>
+
+<div class="sheet tall" id="sheet-search" hidden>
+  <div class="sheet-grab"></div>
+  <h2>さがす</h2>
+  <input type="text" id="search-input" placeholder="メモ・文字・タグで検索" autocomplete="off">
+  <div id="search-colors"></div>
+  <p class="sheet-note" id="search-count"></p>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="search-clear">クリア</button>
+    <button class="row-btn solid" id="search-close">とじる</button>
+  </div>
+</div>
+
+<div class="sheet tall" id="sheet-dup" hidden>
+  <div class="sheet-grab"></div>
+  <h2>重複さがし</h2>
+  <p class="sheet-note">見た目が近い写真をグループにしました。<b>写真そのものは消えません</b>。ゴミ箱に入れるだけなので、いつでも戻せます。</p>
+  <div id="dup-groups"></div>
+  <div id="dup-empty" class="empty" hidden><p class="empty-sub">重複は見つかりませんでした</p></div>
+  <div class="sheet-actions">
+    <button class="row-btn ghost" id="dup-close">とじる</button>
   </div>
 </div>
 

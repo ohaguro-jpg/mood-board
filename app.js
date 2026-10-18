@@ -253,7 +253,122 @@ const S = {
   cmpLayout: 'row',
   cmpFill: false,
   mode: 'canvas',          // canvas（置いて考える）/ grid（ざっと眺める）
+  filter: { q: '', hue: null },   // さがす（メモ・文字・タグ／色）
 };
+
+const TEXT_W = 220, TEXT_H = 190;
+
+/* ========================== 設定 =========================================
+   端末ごとの好み。ボードの中身ではないので localStorage に置く。
+   ========================================================================== */
+const BG_PRESETS = {
+  black: { bg: '#0d0d0f', dot: '#22222a', fg: '#ececed', sub: '#8b8b93' },
+  gray:  { bg: '#3b3b42', dot: '#55555e', fg: '#f1f1f3', sub: '#b6b6bd' },
+  white: { bg: '#f2f2f4', dot: '#d6d6dc', fg: '#1a1a1c', sub: '#6d6d75' },
+  paper: { bg: '#efe9dc', dot: '#d8cdb6', fg: '#2a2415', sub: '#7a6f57' },
+};
+const GAPS = { tight: 8, normal: 20, loose: 40 };
+const FONTS = { normal: 16, large: 17.5, xlarge: 19 };
+const SET = {
+  bg: 'black',
+  dots: 'on',
+  shadow: 'on',
+  gap: 'normal',
+  font: 'normal',     // 文字の大きさ（remを土台にしているので全体が一緒に変わる）
+  snap: 'on',         // 動かすとき、隣とそろう位置に吸い付く
+  wheel: 'pan',       // pan＝2本指で動かす / zoom＝2本指で拡大
+  motion: 'smooth',   // smooth / calm
+};
+const bgPreset = () => BG_PRESETS[SET.bg] || BG_PRESETS.black;
+const gapPx = () => GAPS[SET.gap] != null ? GAPS[SET.gap] : GAPS.normal;
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem('mb_settings');
+    if (raw) Object.assign(SET, JSON.parse(raw));
+  } catch (e) { /* 読めなくても既定値で動く */ }
+  applySettings();
+}
+/* ========================== 元にもどす ====================================
+   ボードの配置をまるごと控えておいて、操作の前の状態に戻せるようにする。
+   画像の実体は消さない方針なので、控えるのは items だけでよい。
+   ========================================================================== */
+const HIST = { past: [], future: [], limit: 40 };
+const snapshotItems = () => S.items.map(it => ({ ...it }));
+
+function pushHistory(snap) {
+  HIST.past.push(snap || snapshotItems());
+  if (HIST.past.length > HIST.limit) HIST.past.shift();
+  HIST.future.length = 0;
+  syncUndoUI();
+}
+function clearHistory() { HIST.past.length = 0; HIST.future.length = 0; syncUndoUI(); }
+function syncUndoUI() {
+  const u = $('#menu-undo'), r = $('#menu-redo');
+  if (u) u.disabled = !HIST.past.length;
+  if (r) r.disabled = !HIST.future.length;
+}
+
+async function applySnapshot(snap) {
+  // いま盤面にあって控えに無いもの＝その操作で足されたもの。ゴミ箱に送って取り消す
+  const keep = new Set(snap.map(i => i.id));
+  for (const it of S.items) {
+    if (keep.has(it.id)) continue;
+    const cur = await dbGet('items', it.id);
+    if (cur) { cur.trashedAt = nowISO(); await dbPut('items', cur); }
+  }
+  // 控えを書き戻す。位置も、ゴミ箱に入れたものの復活も、これ1つで戻る
+  const restored = snap.map(i => { const c = { ...i }; delete c.trashedAt; return c; });
+  if (restored.length) await dbPutMany('items', restored);
+  S.items = restored;
+  S.sel = null;
+  for (const it of S.items) {
+    if (it.imageId && !S.imgs.has(it.imageId)) {
+      const rec = await dbGet('images', it.imageId);
+      if (rec) S.imgs.set(it.imageId, rec);
+    }
+  }
+  if (S.mode === 'grid') renderGrid(); else renderCanvas();
+  $('#board-empty').hidden = S.items.length > 0;
+  setDock(S.picking ? 'select' : 'board');
+  renderPalette();
+  await touchBoard();
+}
+
+async function undo() {
+  if (!HIST.past.length) return toast('これ以上もどせません');
+  HIST.future.push(snapshotItems());
+  await applySnapshot(HIST.past.pop());
+  syncUndoUI();
+  toast('もどしました');
+}
+async function redo() {
+  if (!HIST.future.length) return toast('やり直せるものがありません');
+  HIST.past.push(snapshotItems());
+  await applySnapshot(HIST.future.pop());
+  syncUndoUI();
+  toast('やり直しました');
+}
+
+function applySettings() {
+  const p = bgPreset();
+  const root = document.documentElement;
+  root.style.setProperty('--board-bg', p.bg);
+  root.style.setProperty('--board-dot', SET.dots === 'on' ? p.dot : 'transparent');
+  root.style.setProperty('--board-fg', p.fg);
+  // 影は1枚でなく重ねる（遠く＋近く）。明るい盤面では黒を弱める
+  const light = SET.bg === 'white' || SET.bg === 'paper';
+  const shadow = light
+    ? '0 1px 2px rgba(0,0,0,.10), 0 8px 24px rgba(0,0,0,.12)'
+    : '0 1px 2px rgba(0,0,0,.28), 0 8px 24px rgba(0,0,0,.42)';
+  root.style.setProperty('--item-shadow', SET.shadow === 'on' ? shadow : 'none');
+  root.style.fontSize = (FONTS[SET.font] || FONTS.normal) + 'px';
+  document.body.classList.toggle('calm', SET.motion === 'calm');
+  // 盤面の明暗をCSSから見分けられるようにする
+  ['black','gray','white','paper'].forEach(n =>
+    document.body.classList.toggle('board-' + n, SET.bg === n));
+  try { localStorage.setItem('mb_settings', JSON.stringify(SET)); } catch (e) { }
+}
 
 /* ========================== ホーム ======================================= */
 async function renderHome() {
@@ -340,17 +455,20 @@ async function openBoard(id) {
   S.items.sort((a, b) => (a.z || 0) - (b.z || 0));
   S.imgs.clear();
   for (const it of S.items) {
-    if (!S.imgs.has(it.imageId)) {
+    if (it.imageId && !S.imgs.has(it.imageId)) {
       const rec = await dbGet('images', it.imageId);
       if (rec) S.imgs.set(it.imageId, rec);
     }
   }
   S.view = 'board';
   S.sel = null; S.picking = false; S.picked = [];
+  S.filter = { q: '', hue: null };
+  clearHistory();   // 履歴はボードごと。別のボードには持ち込まない
   $('#view-home').hidden = true;
   $('#view-board').hidden = false;
   $('#btn-back').hidden = false;
   $('#app-title').textContent = S.board.name;
+  document.body.classList.remove('at-home');
   $('#board-sub').textContent = S.items.length + ' まい';
   $$('[data-boardonly]').forEach(el => el.hidden = false);
   $('#btn-view').hidden = false;
@@ -387,6 +505,7 @@ function goHome() {
   $('#view-home').hidden = false;
   $('#btn-back').hidden = true;
   $('#app-title').textContent = 'MOOD BOARD';
+  document.body.classList.add('at-home');
   $('#board-sub').textContent = '';
   $$('[data-boardonly]').forEach(el => el.hidden = true);
   const pb = $('#palette'); if (pb) pb.hidden = true;
@@ -412,15 +531,32 @@ function renderCanvas() {
   for (const it of S.items) canvas.appendChild(makeItemEl(it));
   $('#board-empty').hidden = S.items.length > 0;
   applyCam();
+  applyFilter();
 }
 
 function makeItemEl(it) {
   const el = document.createElement('div');
-  el.className = 'item';
+  el.className = 'item' + (it.type === 'text' ? ' text-item' : '') + (it.type === 'color' ? ' color-item' : '');
   el.dataset.id = it.id;
   el.style.width = it.w + 'px';
   el.style.height = it.h + 'px';
   el.style.transform = 'translate(' + it.x + 'px,' + it.y + 'px)';
+  if (it.type === 'color') {
+    el.style.background = it.hex || '#888';
+    const t = document.createElement('div');
+    t.className = 'sw-hex';
+    t.textContent = (it.hex || '').toUpperCase();
+    t.style.color = readableOn(it.hex);
+    el.appendChild(t);
+    return el;
+  }
+  if (it.type === 'text') {
+    const t = document.createElement('div');
+    t.className = 'note-body';
+    t.textContent = it.text || '';
+    el.appendChild(t);
+    return el;
+  }
   const rec = S.imgs.get(it.imageId);
   if (rec) {
     const im = document.createElement('img');
@@ -440,6 +576,44 @@ function makeItemEl(it) {
     el.appendChild(n);
   }
   return el;
+}
+
+/* ========================== さがす（メモ・文字・タグ・色） ================ */
+function itemMatchesFilter(it) {
+  const f = S.filter;
+  if (!f.q && f.hue == null) return true;
+  let ok = true;
+  if (f.q) {
+    const hay = ((it.note || '') + ' ' + (it.desc || '') + ' ' + (it.text || '') + ' '
+                 + ((it.tags || []).join(' ')) + ' ' + (it.section || '')).toLowerCase();
+    ok = hay.includes(f.q.toLowerCase());
+  }
+  if (ok && f.hue != null) {
+    const rec = S.imgs.get(it.imageId);
+    if (!rec || !rec.dom || rec.dom.s < 0.14) ok = false;
+    else {
+      const dh = Math.min(Math.abs(rec.dom.h - f.hue), 360 - Math.abs(rec.dom.h - f.hue));
+      ok = dh <= 26;
+    }
+  }
+  return ok;
+}
+function applyFilter() {
+  const active = !!(S.filter.q || S.filter.hue != null);
+  let hit = 0;
+  canvas.querySelectorAll('.item').forEach(el => {
+    const it = S.items.find(i => i.id === el.dataset.id);
+    const match = !it || itemMatchesFilter(it);
+    if (match) hit++;
+    el.classList.toggle('dim', active && !match);
+  });
+  $$('#grid-scroll .gcell').forEach(cell => {
+    const it = S.items.find(i => i.id === cell.dataset.id);
+    const match = !it || itemMatchesFilter(it);
+    cell.hidden = active && !match;
+  });
+  const cnt = $('#search-count');
+  if (cnt) cnt.textContent = active ? (hit + ' / ' + S.items.length + ' まいに一致') : '';
 }
 
 function itemEl(id) { return canvas.querySelector('.item[data-id="' + id + '"]'); }
@@ -551,6 +725,62 @@ function itemFromEvent(e) {
   return el ? S.items.find(i => i.id === el.dataset.id) : null;
 }
 
+/* --- そろう位置に吸い付かせる ---
+   隣の左/中央/右・上/中央/下に近づいたら、そこへ寄せて線を出す。
+   手で置いてもボードが散らからない。 */
+function snapPosition(it, nx, ny) {
+  const tol = 7 / S.cam.k;                    // 画面上で7pxぶん
+  const mine = { v: [nx, nx + it.w / 2, nx + it.w], h: [ny, ny + it.h / 2, ny + it.h] };
+  let bv = null, bh = null;
+  for (const o of S.items) {
+    if (o.id === it.id) continue;
+    const ov = [o.x, o.x + o.w / 2, o.x + o.w];
+    const oh = [o.y, o.y + o.h / 2, o.y + o.h];
+    for (let a = 0; a < 3; a++) {
+      for (let b = 0; b < 3; b++) {
+        const dv = ov[b] - mine.v[a];
+        if (Math.abs(dv) < tol && (!bv || Math.abs(dv) < Math.abs(bv.d))) bv = { d: dv, at: ov[b] };
+        const dh = oh[b] - mine.h[a];
+        if (Math.abs(dh) < tol && (!bh || Math.abs(dh) < Math.abs(bh.d))) bh = { d: dh, at: oh[b] };
+      }
+    }
+  }
+  return {
+    x: Math.round(bv ? nx + bv.d : nx),
+    y: Math.round(bh ? ny + bh.d : ny),
+    vx: bv ? bv.at : null,
+    hy: bh ? bh.at : null,
+  };
+}
+function showGuides(vx, hy) {
+  const gv = $('#guide-v'), gh = $('#guide-h');
+  if (vx == null) gv.hidden = true;
+  else { gv.hidden = false; gv.style.left = (vx * S.cam.k + S.cam.x) + 'px'; }
+  if (hy == null) gh.hidden = true;
+  else { gh.hidden = false; gh.style.top = (hy * S.cam.k + S.cam.y) + 'px'; }
+}
+function hideGuides() { $('#guide-v').hidden = true; $('#guide-h').hidden = true; }
+
+/* --- 枠で囲んで選ぶ --- */
+function marqueeTo(g, e) {
+  const r = wrap.getBoundingClientRect();
+  const x1 = Math.min(g.sx, e.clientX), x2 = Math.max(g.sx, e.clientX);
+  const y1 = Math.min(g.sy, e.clientY), y2 = Math.max(g.sy, e.clientY);
+  const box = $('#marquee');
+  box.hidden = false;
+  box.style.left = (x1 - r.left) + 'px';
+  box.style.top = (y1 - r.top) + 'px';
+  box.style.width = (x2 - x1) + 'px';
+  box.style.height = (y2 - y1) + 'px';
+  const a = toCanvas(x1, y1), b = toCanvas(x2, y2);
+  const hit = S.items
+    .filter(it => it.x < b.x && it.x + it.w > a.x && it.y < b.y && it.y + it.h > a.y)
+    .map(it => it.id);
+  S.picked = [...new Set([...g.base, ...hit])];
+  updatePickUI();
+}
+function hideMarquee() { $('#marquee').hidden = true; }
+
 wrap.addEventListener('pointerdown', (e) => {
   stopGlide();
   canvas.classList.remove('smooth');
@@ -576,14 +806,23 @@ wrap.addEventListener('pointerdown', (e) => {
 
   if (onHandle && S.sel) {
     const sel = S.items.find(i => i.id === S.sel);
-    G = { mode: 'resize', it: sel, w0: sel.w, h0: sel.h, sx: e.clientX, sy: e.clientY, moved: false };
+    G = { mode: 'resize', it: sel, w0: sel.w, h0: sel.h, sx: e.clientX, sy: e.clientY, moved: false, snap: snapshotItems() };
   } else if (it && !S.picking) {
-    G = { mode: 'drag', it, x0: it.x, y0: it.y, sx: e.clientX, sy: e.clientY, moved: false, startId: it.id };
+    G = { mode: 'drag', it, x0: it.x, y0: it.y, sx: e.clientX, sy: e.clientY, moved: false, startId: it.id, snap: snapshotItems() };
     // つかんだら手前に出す（見た目だけ即時）
     const el = itemEl(it.id);
     if (el) canvas.appendChild(el);
   } else if (it && S.picking) {
     G = { mode: 'tap-pick', it, sx: e.clientX, sy: e.clientY, moved: false };
+  } else if (e.button === 1 || spaceHeld) {
+    // 中ボタン / スペース＋ドラッグ は、いつでも盤面を動かす
+    G = { mode: 'pan', cam0: { ...S.cam }, sx: e.clientX, sy: e.clientY, moved: false,
+          lastX: e.clientX, lastY: e.clientY, lastT: performance.now(), vx: 0, vy: 0 };
+  } else if (S.picking || e.shiftKey || e.pointerType === 'mouse') {
+    // 何もないところからのドラッグは、枠で囲んで選ぶ。
+    // マウスはこれが既定（指は盤面移動のままにしないとスマホで動かせなくなる）
+    if (!S.picking) startPicking(true);
+    G = { mode: 'marquee', sx: e.clientX, sy: e.clientY, moved: false, base: S.picked.slice() };
   } else {
     G = { mode: 'pan', cam0: { ...S.cam }, sx: e.clientX, sy: e.clientY, moved: false,
           lastX: e.clientX, lastY: e.clientY, lastT: performance.now(), vx: 0, vy: 0 };
@@ -628,10 +867,18 @@ wrap.addEventListener('pointermove', (e) => {
     }
     applyCam();
   } else if (G.mode === 'drag') {
-    G.it.x = G.x0 + dx / S.cam.k;
-    G.it.y = G.y0 + dy / S.cam.k;
+    const nx = G.x0 + dx / S.cam.k;
+    const ny = G.y0 + dy / S.cam.k;
+    // option を押している間はスナップを切る（細かく置きたいとき用）
+    const s = (SET.snap === 'on' && !e.altKey)
+      ? snapPosition(G.it, nx, ny)
+      : { x: Math.round(nx), y: Math.round(ny), vx: null, hy: null };
+    G.it.x = s.x; G.it.y = s.y;
+    showGuides(s.vx, s.hy);
     updateItemEl(G.it);
     positionHandle();
+  } else if (G.mode === 'marquee') {
+    marqueeTo(G, e);
   } else if (G.mode === 'resize') {
     const ratio = G.h0 / G.w0;
     const nw = clamp(G.w0 + dx / S.cam.k, 40, 6000);
@@ -659,8 +906,11 @@ async function endGesture(e) {
 
   const g = G; G = null;
 
+  hideGuides();
+
   if (g.mode === 'drag') {
     if (g.moved) {
+      pushHistory(g.snap);
       // 手前に持ってきたので z を振り直し
       const maxZ = Math.max(0, ...S.items.map(i => i.z || 0));
       g.it.z = maxZ + 1;
@@ -671,16 +921,20 @@ async function endGesture(e) {
       selectItem(g.it.id);
       const t = Date.now();
       if (lastTap.id === g.it.id && t - lastTap.t < 320) {
-        openViewer(g.it);
+        if (g.it.type === 'text') editTextItem(g.it);
+        else if (g.it.type === 'color') copyHex(g.it.hex || '');
+        else openViewer(g.it);
         lastTap = { t: 0, id: null };
       } else {
         lastTap = { t, id: g.it.id };
       }
     }
   } else if (g.mode === 'resize') {
-    if (g.moved) { await dbPut('items', g.it); touchBoard(); }
+    if (g.moved) { pushHistory(g.snap); await dbPut('items', g.it); touchBoard(); }
   } else if (g.mode === 'tap-pick') {
     if (!g.moved) togglePick(g.it.id);
+  } else if (g.mode === 'marquee') {
+    hideMarquee();
   } else if (g.mode === 'pan') {
     if (!g.moved) selectItem(null);
     else if (performance.now() - g.lastT < 90 && Math.hypot(g.vx, g.vy) > 0.12) glide(g.vx, g.vy);
@@ -689,17 +943,83 @@ async function endGesture(e) {
 wrap.addEventListener('pointerup', endGesture);
 wrap.addEventListener('pointercancel', endGesture);
 
-/* マウスホイールでズーム（PC用） */
-wrap.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const r = wrap.getBoundingClientRect();
-  const cx = e.clientX - r.left, cy = e.clientY - r.top;
+/* --- トラックパッド / マウスホイール（PC用） ---
+   2本指のスクロール＝動かす。ピンチと ⌘+ホイール＝拡大縮小。
+   トラックパッドの2本指スクロールもホイールとして飛んでくるので、
+   全部をズームに割り当てると「動かそうとすると拡大する」状態になる。 */
+
+/* ズームの中心を指の位置に固定したままスケールする */
+function zoomAt(cx, cy, k) {
   const wx = (cx - S.cam.x) / S.cam.k, wy = (cy - S.cam.y) / S.cam.k;
-  const k = clamp(S.cam.k * (e.deltaY < 0 ? 1.14 : 1 / 1.14), 0.05, 6);
   S.cam.k = k;
   S.cam.x = cx - wx * k;
   S.cam.y = cy - wy * k;
-  smoothCam(200);
+  applyCam();
+}
+
+/* スペースを押している間は、どこをドラッグしても盤面が動く（Figmaなどと同じ） */
+let spaceHeld = false;
+const isTyping = (e) => {
+  const t = e.target;
+  return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable;
+};
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !isTyping(e)) { spaceHeld = true; wrap.style.cursor = 'grab'; }
+});
+addEventListener('keyup', (e) => {
+  if (e.code === 'Space') { spaceHeld = false; wrap.style.cursor = ''; }
+});
+addEventListener('blur', () => { spaceHeld = false; wrap.style.cursor = ''; });
+
+/* Safari のトラックパッドのピンチはWebKit独自のイベントで来る（Chromeでは発火しない） */
+let gesture0 = null;
+wrap.addEventListener('gesturestart', (e) => {
+  e.preventDefault();
+  const r = wrap.getBoundingClientRect();
+  gesture0 = { k: S.cam.k, cx: e.clientX - r.left, cy: e.clientY - r.top };
+});
+wrap.addEventListener('gesturechange', (e) => {
+  e.preventDefault();
+  if (!gesture0) return;
+  zoomAt(gesture0.cx, gesture0.cy, clamp(gesture0.k * e.scale, 0.05, 6));
+});
+wrap.addEventListener('gestureend', (e) => { e.preventDefault(); gesture0 = null; });
+
+/* ホイールの量をピクセルに揃える。
+   deltaMode は 0=ピクセル / 1=行 / 2=ページ で、マウスやブラウザによって変わる。
+   行で来たものを素のまま使うと「1ノッチで3pxしか動かない」状態になる。 */
+function wheelPx(e) {
+  const m = e.deltaMode;
+  const unit = m === 1 ? 16 : m === 2 ? wrap.clientHeight : 1;
+  return { x: e.deltaX * unit, y: e.deltaY * unit };
+}
+
+/* マウスのホイールは1ノッチが大きく粗い。トラックパッドは細かい値が大量に来る。
+   同じ係数だとマウスで飛びすぎるので、粗い入力ほど倍率を抑える。 */
+function zoomFactorFor(dy) {
+  const a = Math.abs(dy);
+  const perPx = a > 40 ? 0.0015 : 0.005;   // 粗い入力(マウス)は控えめに
+  return Math.exp(-dy * perPx);
+}
+
+wrap.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (gesture0) return;                     // Safariのピンチ中は二重に効かせない
+  stopGlide();
+  const d = wheelPx(e);
+
+  // Chromeはトラックパッドのピンチを ctrlKey 付きのホイールとして送ってくる
+  if (e.ctrlKey || e.metaKey || SET.wheel === 'zoom') {
+    const r = wrap.getBoundingClientRect();
+    const dy = clamp(d.y, -120, 120);
+    zoomAt(e.clientX - r.left, e.clientY - r.top,
+           clamp(S.cam.k * zoomFactorFor(dy), 0.05, 6));
+    return;
+  }
+
+  // shift＋ホイールは横スクロール（マウスは縦にしか回せないため）
+  if (e.shiftKey && !d.x) { S.cam.x -= d.y; }
+  else { S.cam.x -= d.x; S.cam.y -= d.y; }
   applyCam();
 }, { passive: false });
 
@@ -720,6 +1040,9 @@ function selectItem(id) {
       positionHandle();
     }
     setDock('item');
+    const it = S.items.find(i => i.id === id);
+    const noteSpan = $('#btn-item-note span');
+    if (noteSpan) noteSpan.textContent = (it && it.type === 'text') ? '文字' : 'メモ';
   } else {
     setDock(S.picking ? 'select' : 'board');
   }
@@ -743,12 +1066,12 @@ function setDock(which) {
 }
 
 /* ---- みくらべ選択モード ---- */
-function startPicking() {
+function startPicking(quiet) {
   S.picking = true; S.picked = [];
   selectItem(null);
   setDock('select');
   updatePickUI();
-  toast('くらべたい写真を、順番にタップ');
+  if (!quiet) toast('タップで選ぶ／何もない所をドラッグすると枠で囲んで選べます', 3200);
 }
 function stopPicking() {
   S.picking = false; S.picked = [];
@@ -761,11 +1084,11 @@ function stopPicking() {
 function togglePick(id) {
   const i = S.picked.indexOf(id);
   if (i >= 0) S.picked.splice(i, 1);
-  else {
-    if (S.picked.length >= 6) { toast('いちどに くらべられるのは 6枚まで'); return; }
-    S.picked.push(id);
-  }
+  else S.picked.push(id);
   updatePickUI();
+}
+function pickedImageCount() {
+  return S.picked.filter(id => { const it = S.items.find(i => i.id === id); return it && it.type !== 'text'; }).length;
 }
 function updatePickUI() {
   canvas.querySelectorAll('.item').forEach(el => {
@@ -788,14 +1111,48 @@ function updatePickUI() {
     }
   });
   $('#select-count').textContent = S.picked.length + ' まい';
-  $('#btn-compare-go').disabled = S.picked.length < 2;
+  const imgN = pickedImageCount();
+  $('#btn-compare-go').disabled = imgN < 2 || imgN > 6;
+  $('#btn-bulk-move').disabled = S.picked.length < 1;
+  $('#btn-bulk-align').disabled = S.picked.length < 2;
+  $('#btn-bulk-tag').disabled = S.picked.length < 1;
+  $('#btn-bulk-trash').disabled = S.picked.length < 1;
+  $('#btn-bulk-print').disabled = S.picked.length < 1;
   if (S.mode === 'grid') syncGridPick();
 }
 
 /* ========================== くらべる ===================================== */
 async function openCompare(ids) {
+  ids = ids.filter(id => { const it = S.items.find(i => i.id === id); return it && it.type !== 'text'; });
   const stage = $('#compare-stage');
   stage.innerHTML = '';
+
+  if (S.cmpLayout === 'overlay') {
+    if (ids.length !== 2) { toast('「かさねる」は2枚を選んでください'); S.cmpLayout = 'row'; return openCompare(ids); }
+    stage.className = 'overlay';
+    stage.style.gridTemplateColumns = '';
+    const recs = [];
+    for (const id of ids) {
+      const it = S.items.find(i => i.id === id);
+      recs.push(it ? await dbGet('images', it.imageId) : null);
+    }
+    const cell = document.createElement('div'); cell.className = 'ov-cell';
+    const imB = document.createElement('img'); imB.className = 'ov-bottom';
+    const imT = document.createElement('img'); imT.className = 'ov-top';
+    if (recs[0]) imB.src = blobURL(recs[0].id, 'f', recs[0].full);
+    if (recs[1]) imT.src = blobURL(recs[1].id, 'f', recs[1].full);
+    const wrapT = document.createElement('div'); wrapT.className = 'ov-top-wrap'; wrapT.appendChild(imT);
+    const handle = document.createElement('div'); handle.className = 'ov-handle';
+    cell.append(imB, wrapT, handle);
+    attachOverlaySlider(cell, wrapT, handle);
+    stage.appendChild(cell);
+    $$('#cmp-layouts .lay').forEach(b => b.classList.toggle('on', b.dataset.lay === 'overlay'));
+    $('#cmp-fill').hidden = true;
+    $('#compare').hidden = false;
+    return;
+  }
+  $('#cmp-fill').hidden = false;
+
   stage.className = S.cmpLayout + (S.cmpFill ? ' fill' : '');
   if (S.cmpLayout === 'grid') {
     stage.style.gridTemplateColumns = ids.length <= 4 ? '1fr 1fr' : '1fr 1fr 1fr';
@@ -803,7 +1160,7 @@ async function openCompare(ids) {
 
   for (const id of ids) {
     const it = S.items.find(i => i.id === id);
-    if (!it) continue;
+    if (!it || !it.imageId) continue;
     const rec = await dbGet('images', it.imageId);
     const cell = document.createElement('div');
     cell.className = 'cmp-cell';
@@ -822,12 +1179,66 @@ async function openCompare(ids) {
   $('#compare').hidden = false;
 }
 
+/* 2枚を重ねて、境界をドラッグして比べる */
+function attachOverlaySlider(cell, wrapT, handle) {
+  const setPos = (ratio) => {
+    ratio = clamp(ratio, 0, 1);
+    wrapT.style.clipPath = 'inset(0 ' + ((1 - ratio) * 100) + '% 0 0)';
+    handle.style.left = (ratio * 100) + '%';
+  };
+  setPos(0.5);
+  let dragging = false;
+  const move = (clientX) => {
+    const r = cell.getBoundingClientRect();
+    setPos((clientX - r.left) / r.width);
+  };
+  cell.addEventListener('pointerdown', (e) => { dragging = true; cell.setPointerCapture(e.pointerId); move(e.clientX); });
+  cell.addEventListener('pointermove', (e) => { if (dragging) move(e.clientX); });
+  const stop = () => { dragging = false; };
+  cell.addEventListener('pointerup', stop);
+  cell.addEventListener('pointercancel', stop);
+}
+
 /* セルごとに独立したピンチズーム */
 function attachCellZoom(cell, img) {
   const st = { x: 0, y: 0, k: 1 };
   const pts = new Map();
   let g = null;
   const apply = () => { img.style.transform = 'translate(' + st.x + 'px,' + st.y + 'px) scale(' + st.k + ')'; };
+
+  /* トラックパッド（ピンチは指2本のポインタとしては飛んでこないので、別で受ける） */
+  const zoomCellAt = (cx, cy, k) => {
+    const wx = (cx - st.x) / st.k, wy = (cy - st.y) / st.k;
+    st.k = k;
+    st.x = cx - wx * k;
+    st.y = cy - wy * k;
+    if (st.k <= 1) { st.x = 0; st.y = 0; st.k = 1; }
+    apply();
+  };
+  let cg = null;
+  cell.addEventListener('gesturestart', (e) => {
+    e.preventDefault();
+    const r = cell.getBoundingClientRect();
+    cg = { k: st.k, cx: e.clientX - r.left, cy: e.clientY - r.top };
+  });
+  cell.addEventListener('gesturechange', (e) => {
+    e.preventDefault();
+    if (cg) zoomCellAt(cg.cx, cg.cy, clamp(cg.k * e.scale, 1, 8));
+  });
+  cell.addEventListener('gestureend', (e) => { e.preventDefault(); cg = null; });
+  cell.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (cg) return;
+    const r = cell.getBoundingClientRect();
+    if (e.ctrlKey || e.metaKey) {
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? cell.clientHeight : 1;
+      const d = clamp(e.deltaY * unit, -120, 120);
+      zoomCellAt(e.clientX - r.left, e.clientY - r.top, clamp(st.k * Math.exp(-d * 0.006), 1, 8));
+      return;
+    }
+    if (st.k > 1) { st.x -= e.deltaX; st.y -= e.deltaY; apply(); }
+  }, { passive: false });
+
   cell.addEventListener('pointerdown', (e) => {
     cell.setPointerCapture(e.pointerId);
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -875,10 +1286,15 @@ function attachCellZoom(cell, img) {
 function closeCompare() { $('#compare').hidden = true; $('#compare-stage').innerHTML = ''; }
 
 /* ========================== 1枚を全画面 ================================== */
-let viewerBlob = null, viewerName = '';
+let viewerBlob = null, viewerName = '', viewerItem = null;
 async function openViewer(it) {
+  if (!it.imageId) return;
   const rec = await dbGet('images', it.imageId);
   if (!rec) return toast('画像が見つかりません');
+  viewerItem = it;
+  const un = $('#viewer-uncrop');
+  if (un) un.hidden = !it.croppedFrom;
+  $('#viewer-pal').hidden = true;
   viewerBlob = rec.full; viewerName = (it.note || 'image') + '.' + (rec.full.type.split('/')[1] || 'jpg');
   $('#viewer-img').src = blobURL(rec.id, 'f', rec.full);
   const bits = [rec.w + '×' + rec.h, fmtBytes(rec.full.size)];
@@ -916,6 +1332,7 @@ async function addImageToBoard(rec, spot) {
     h: Math.round(BASE_W * ratio),
     z: Math.max(0, ...S.items.map(i => i.z || 0)) + 1,
     note: '',
+    tags: [],
     addedAt: nowISO(),
   };
   await dbPut('items', it);
@@ -923,6 +1340,99 @@ async function addImageToBoard(rec, spot) {
   S.imgs.set(rec.id, rec);
   canvas.appendChild(makeItemEl(it));
   return it;
+}
+
+/* ========================== 色を置く（色見本） ============================
+   ムードボードで見ているのは結局「色と質感」なので、色そのものも置けるようにする。
+   ========================================================================== */
+const SWATCH_W = 170, SWATCH_H = 170;
+
+/* 背景の明るさに合わせて、上に乗せる文字の色を決める */
+function readableOn(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return 'rgba(255,255,255,.85)';
+  const n = parseInt(m[1], 16);
+  const lum = (((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114) / 255;
+  return lum > 0.62 ? 'rgba(0,0,0,.62)' : 'rgba(255,255,255,.85)';
+}
+async function copyHex(hex) {
+  try { await navigator.clipboard.writeText(hex); toast(hex.toUpperCase() + ' をコピーしました'); }
+  catch (e) { toast(hex.toUpperCase()); }
+}
+function normalizeHex(v) {
+  let s = String(v || '').trim();
+  if (!s.startsWith('#')) s = '#' + s;
+  if (/^#[0-9a-f]{3}$/i.test(s)) s = '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
+  return /^#[0-9a-f]{6}$/i.test(s) ? s.toLowerCase() : null;
+}
+
+async function addColorToBoard(hex, spot) {
+  const it = {
+    id: uid(),
+    boardId: S.boardId,
+    type: 'color',
+    hex,
+    x: Math.round(spot.x - SWATCH_W / 2),
+    y: Math.round(spot.y - SWATCH_H / 2),
+    w: SWATCH_W,
+    h: SWATCH_H,
+    z: Math.max(0, ...S.items.map(i => i.z || 0)) + 1,
+    note: '',
+    tags: [],
+    addedAt: nowISO(),
+  };
+  await dbPut('items', it);
+  S.items.push(it);
+  const el = makeItemEl(it);
+  canvas.appendChild(el);
+  el.classList.add('in');
+  return it;
+}
+
+/* ========================== 文字を置く（ノート） =========================== */
+async function addTextToBoard(text, spot) {
+  const it = {
+    id: uid(),
+    boardId: S.boardId,
+    type: 'text',
+    x: Math.round(spot.x - TEXT_W / 2),
+    y: Math.round(spot.y - TEXT_H / 2),
+    w: TEXT_W,
+    h: TEXT_H,
+    z: Math.max(0, ...S.items.map(i => i.z || 0)) + 1,
+    text: text || '',
+    note: '',
+    tags: [],
+    addedAt: nowISO(),
+  };
+  await dbPut('items', it);
+  S.items.push(it);
+  const el = makeItemEl(it);
+  canvas.appendChild(el);
+  el.classList.add('in');
+  return it;
+}
+
+async function editTextItem(it) {
+  const v = await ask('文字を編集（空にするとゴミ箱へ）', it.text || '', true);
+  if (v === null) return;
+  pushHistory();
+  if (!v) {
+    it.trashedAt = nowISO();
+    await dbPut('items', it);
+    S.items = S.items.filter(i => i.id !== it.id);
+    const el = itemEl(it.id); if (el) el.remove();
+    selectItem(null);
+    $('#board-empty').hidden = S.items.length > 0;
+    touchBoard();
+    toast('からっぽにしたのでゴミ箱に入れました');
+    return;
+  }
+  it.text = v;
+  await dbPut('items', it);
+  const el = itemEl(it.id);
+  if (el) { const b = el.querySelector('.note-body'); if (b) b.textContent = v; }
+  touchBoard();
 }
 
 /* 既に同じ画像を持っていれば使い回す（Pinterestは重複が多い） */
@@ -955,6 +1465,7 @@ async function storeImage(blob, srcUrl) {
 async function importFiles(files) {
   const list = Array.from(files).filter(f => f.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|avif|heic)$/i.test(f.name));
   if (!list.length) return toast('画像が見つかりませんでした');
+  pushHistory();
   progOpen('写真を取り込んでいます');
   let ok = 0, ng = 0, heic = 0;
   const before = S.items.length;
@@ -990,6 +1501,7 @@ async function importUrls(text) {
   )];
   if (!urls.length) return toast('URLが見つかりませんでした');
 
+  pushHistory();
   progOpen('取り込んでいます');
   let ok = 0, dup = 0, ng = 0;
   const failed = [];
@@ -1056,8 +1568,9 @@ async function loadPinSnippet() {
 /* ========================== ならべる（石積み） =========================== */
 async function arrangeMasonry() {
   if (!S.items.length) return;
+  pushHistory();
   const n = S.items.length;
-  const colW = BASE_W, gap = 20;
+  const colW = BASE_W, gap = gapPx();
   // 並べ終わった形が画面の縦横比に近くなる列数を選ぶ
   const wrapEl = $('#canvas-wrap');
   const screenRatio = wrapEl.clientWidth / Math.max(1, wrapEl.clientHeight);
@@ -1253,9 +1766,15 @@ async function importZip(file) {
     }
     const newItems = [];
     for (const it of (meta.items || [])) {
-      const bid = boardMap.get(it.boardId), iid = imgMap.get(it.imageId);
-      if (!bid || !iid) continue;
-      newItems.push({ ...it, id: uid(), boardId: bid, imageId: iid });
+      const bid = boardMap.get(it.boardId);
+      if (!bid) continue;
+      if (it.imageId) {
+        const iid = imgMap.get(it.imageId);
+        if (!iid) continue;
+        newItems.push({ ...it, id: uid(), boardId: bid, imageId: iid });
+      } else if (isCardItem(it)) {
+        newItems.push({ ...it, id: uid(), boardId: bid });
+      }
     }
     if (newItems.length) await dbPutMany('items', newItems);
     _srcIndex = null;
@@ -1298,9 +1817,109 @@ $('#btn-menu').onclick = () => {
 };
 $('#btn-new-board').onclick = newBoard;
 
+/* --- 設定（歯車） --- */
+const SET_CHIPS = [['#st-bg', 'bg'], ['#st-dots', 'dots'], ['#st-shadow', 'shadow'],
+                   ['#st-gap', 'gap'], ['#st-font', 'font'], ['#st-snap', 'snap'],
+                   ['#st-wheel', 'wheel'], ['#st-motion', 'motion']];
+function syncSettingChips() {
+  SET_CHIPS.forEach(([sel, key]) => {
+    $$(sel + ' .chip').forEach(b => b.classList.toggle('on', b.dataset.v === SET[key]));
+  });
+}
+SET_CHIPS.forEach(([sel, key]) => {
+  $$(sel + ' .chip').forEach(b => b.onclick = () => {
+    SET[key] = b.dataset.v;
+    applySettings();
+    syncSettingChips();
+    // すきまは、次に「ならべる」したときから効く
+    if (key === 'gap' && S.view === 'board') toast('「ならべる」でこのすきまになります');
+  });
+});
+$('#btn-settings').onclick = () => { syncSettingChips(); openSheet('#sheet-settings'); };
+$('#settings-close').onclick = closeSheets;
+
 $('#btn-add').onclick = () => openSheet('#sheet-add');
 $('#add-photos').onclick = () => { closeSheets(); $('#file-input').click(); };
+$('#add-text').onclick = async () => {
+  closeSheets();
+  const v = await ask('文字を書く', '', true);
+  if (v === null || !v) return;
+  pushHistory();
+  const it = await addTextToBoard(v, viewCenterCanvas());
+  selectItem(it.id);
+  touchBoard();
+};
+$('#add-color').onclick = () => { renderColorSheet(); openSheet('#sheet-color'); };
 $('#add-url').onclick = () => openSheet('#sheet-url');
+
+/* --- 色を置く --- */
+async function placeColor(hex, near) {
+  const h = normalizeHex(hex);
+  if (!h) return toast('色のコードが読めませんでした');
+  closeSheets();
+  pushHistory();
+  const spot = near || viewCenterCanvas();
+  const it = await addColorToBoard(h, spot);
+  selectItem(it.id);
+  touchBoard();
+  toast(h.toUpperCase() + ' を置きました');
+}
+function renderColorSheet() {
+  const box = $('#color-board-pal');
+  box.innerHTML = '';
+  const pal = boardPalette(8);
+  if (!pal.length) {
+    const p = document.createElement('p');
+    p.className = 'sheet-note';
+    p.textContent = '写真を入れると、そこから拾った色がここに並びます。';
+    box.appendChild(p);
+  }
+  pal.forEach(c => {
+    const s = document.createElement('button');
+    s.className = 'sw-btn';
+    s.style.background = c.hex;
+    s.style.color = readableOn(c.hex);
+    s.textContent = c.hex.toUpperCase();
+    s.onclick = () => placeColor(c.hex);
+    box.appendChild(s);
+  });
+}
+$('#color-input').oninput = (e) => { $('#color-hex').value = e.target.value; };
+$('#color-add').onclick = () => placeColor($('#color-hex').value || $('#color-input').value);
+$('#color-close').onclick = closeSheets;
+
+/* --- 1枚表示から、その写真の色を取り出して置く --- */
+$('#viewer-colors').onclick = async () => {
+  const box = $('#viewer-pal');
+  if (!box.hidden) { box.hidden = true; return; }
+  if (!viewerItem || !viewerItem.imageId) return;
+  const rec = S.imgs.get(viewerItem.imageId) || await dbGet('images', viewerItem.imageId);
+  if (!rec) return;
+  if (!rec.dom) {
+    try {
+      const col = await extractColors(rec.thumb || rec.full);
+      rec.dom = col.dom; rec.hex = col.hex; rec.pal = col.pal;
+      await dbPut('images', rec);
+    } catch (e) { return toast('色を読み取れませんでした'); }
+  }
+  const list = [...new Set([rec.hex, ...(rec.pal || [])])].filter(Boolean);
+  box.innerHTML = '';
+  list.forEach(hex => {
+    const s = document.createElement('button');
+    s.className = 'sw-btn';
+    s.style.background = hex;
+    s.style.color = readableOn(hex);
+    s.textContent = hex.toUpperCase();
+    s.onclick = async () => {
+      const near = { x: viewerItem.x + viewerItem.w + 30 + SWATCH_W / 2, y: viewerItem.y + SWATCH_H / 2 };
+      $('#viewer').hidden = true;
+      box.hidden = true;
+      await placeColor(hex, near);
+    };
+    box.appendChild(s);
+  });
+  box.hidden = false;
+};
 $('#add-pin').onclick = async () => {
   openSheet('#sheet-pin');
   try { $('#pin-snippet').textContent = await loadPinSnippet(); }
@@ -1336,6 +1955,41 @@ $('#pin-copy').onclick = async () => {
 $('#btn-select').onclick = () => { S.picking ? stopPicking() : startPicking(); };
 $('#btn-select-cancel').onclick = stopPicking;
 $('#btn-compare-go').onclick = () => openCompare(S.picked);
+
+/* --- さがす（メモ・文字・タグ・色） --- */
+function renderSearchColors() {
+  const box = $('#search-colors');
+  if (!box) return;
+  box.innerHTML = '';
+  const pal = boardPalette(8);
+  pal.forEach(p => {
+    const s = document.createElement('span');
+    const on = S.filter.hue != null && Math.abs(p.h - S.filter.hue) < 1;
+    s.className = 'sw' + (on ? ' on' : '');
+    s.style.background = p.hex;
+    s.onclick = () => {
+      S.filter.hue = on ? null : p.h;
+      renderSearchColors();
+      applyFilter();
+    };
+    box.appendChild(s);
+  });
+}
+$('#btn-search').onclick = () => {
+  $('#search-input').value = S.filter.q;
+  renderSearchColors();
+  applyFilter();
+  openSheet('#sheet-search');
+  setTimeout(() => $('#search-input').focus(), 60);
+};
+$('#search-input').oninput = (e) => { S.filter.q = e.target.value.trim(); applyFilter(); };
+$('#search-clear').onclick = () => {
+  S.filter = { q: '', hue: null };
+  $('#search-input').value = '';
+  renderSearchColors();
+  applyFilter();
+};
+$('#search-close').onclick = closeSheets;
 $('#btn-arrange').onclick = () => {
   renderPaletteBig();
   openSheet('#sheet-arrange');
@@ -1368,6 +2022,7 @@ $('#btn-fit').onclick = () => fitAll();
 function selItem() { return S.items.find(i => i.id === S.sel); }
 $('#btn-item-front').onclick = async () => {
   const it = selItem(); if (!it) return;
+  pushHistory();
   it.z = Math.max(0, ...S.items.map(i => i.z || 0)) + 1;
   const el = itemEl(it.id); if (el) canvas.appendChild(el);
   await dbPut('items', it);
@@ -1376,23 +2031,151 @@ $('#btn-item-front').onclick = async () => {
 };
 $('#btn-item-big').onclick = async () => {
   const it = selItem(); if (!it) return;
+  pushHistory();
   const f = it.w < 500 ? 1.5 : (it.w < 900 ? 1.35 : 0.5);
   it.w = Math.round(it.w * f); it.h = Math.round(it.h * f);
   updateItemEl(it); positionHandle();
   await dbPut('items', it); touchBoard();
 };
-$('#btn-item-note').onclick = async () => {
+/* ==========================================================================
+   この1枚について（ひとこと・説明・タグ・区分け）
+   タグは打たせず「押すだけ」にする。打たせる作りだと続かず、
+   結局ほとんどが未整理のまま溜まってしまうため。
+   選んだ複数枚にまとめて付けられるようにもしてある。
+   ========================================================================== */
+const NOTE = { targets: [], tags: [], section: '' };
+
+/* このボードで今まで使ったタグを、よく使う順に集める */
+function knownTags() {
+  const count = new Map();
+  S.items.forEach(i => (i.tags || []).forEach(t => count.set(t, (count.get(t) || 0) + 1)));
+  return [...count.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+}
+function knownSections() {
+  const set = new Set();
+  S.items.forEach(i => { if (i.section) set.add(i.section); });
+  return [...set].sort();
+}
+
+function renderTagPicker() {
+  const picked = $('#tag-picked'), sug = $('#tag-suggest');
+  picked.innerHTML = '';
+  NOTE.tags.forEach(t => {
+    const c = document.createElement('button');
+    c.className = 'chip on';
+    c.innerHTML = '<span></span><span class="x">×</span>';
+    c.firstChild.textContent = t;
+    c.onclick = () => { NOTE.tags = NOTE.tags.filter(x => x !== t); renderTagPicker(); };
+    picked.appendChild(c);
+  });
+  if (!NOTE.tags.length) {
+    const e = document.createElement('div');
+    e.className = 'tag-empty'; e.textContent = 'まだタグなし';
+    picked.appendChild(e);
+  }
+  sug.innerHTML = '';
+  knownTags().filter(t => !NOTE.tags.includes(t)).slice(0, 12).forEach(t => {
+    const c = document.createElement('button');
+    c.className = 'chip';
+    c.textContent = t;
+    c.onclick = () => { NOTE.tags.push(t); renderTagPicker(); };
+    sug.appendChild(c);
+  });
+}
+
+function renderSectionPicker() {
+  const box = $('#sec-picked');
+  box.innerHTML = '';
+  const mk = (name, label) => {
+    const c = document.createElement('button');
+    c.className = 'chip' + (NOTE.section === name ? ' on' : '');
+    c.textContent = label;
+    c.onclick = () => { NOTE.section = name; renderSectionPicker(); };
+    return c;
+  };
+  box.appendChild(mk('', 'なし'));
+  knownSections().forEach(sname => box.appendChild(mk(sname, sname)));
+  const add = document.createElement('button');
+  add.className = 'chip add';
+  add.textContent = '＋ 新しい区分け';
+  add.onclick = async () => {
+    const v = await ask('区分けの名前', '');
+    if (v) { NOTE.section = v.trim(); renderSectionPicker(); }
+  };
+  box.appendChild(add);
+}
+
+function addTypedTag() {
+  const inp = $('#note-tags');
+  inp.value.split(/[,、\s]+/).map(x => x.trim()).filter(Boolean)
+    .forEach(t => { if (!NOTE.tags.includes(t)) NOTE.tags.push(t); });
+  inp.value = '';
+  renderTagPicker();
+}
+$('#tag-add-btn').onclick = addTypedTag;
+$('#note-tags').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); addTypedTag(); }
+});
+
+/* 1枚でも、選んだ複数枚でも開ける */
+function openNoteSheet(targets) {
+  NOTE.targets = targets;
+  const one = targets.length === 1 ? targets[0] : null;
+  $('#note-title').textContent = one ? 'この1枚について' : targets.length + ' 枚にまとめて';
+  $('#note-scope').textContent = one
+    ? '写真の下に出るのは「ひとこと」だけ。あとは「さがす」で使えます。'
+    : 'タグと区分けが、選んだ ' + targets.length + ' 枚すべてに付きます。';
+  // まとめて付けるときは、ひとこと/説明は触らない（上書き事故を防ぐ）
+  $('#note-body').parentElement.querySelectorAll('#note-body,#note-desc').forEach(() => { });
+  ['#note-body', '#note-desc'].forEach(sel => {
+    const el = $(sel);
+    const label = el.previousElementSibling;
+    el.hidden = !one; if (label && label.classList.contains('fld-label')) label.hidden = !one;
+  });
+  if (one) {
+    $('#note-body').value = one.note || '';
+    $('#note-desc').value = one.desc || '';
+    NOTE.tags = (one.tags || []).slice();
+    NOTE.section = one.section || '';
+  } else {
+    NOTE.tags = [];
+    NOTE.section = '';
+  }
+  $('#note-tags').value = '';
+  renderTagPicker();
+  renderSectionPicker();
+  openSheet('#sheet-note');
+  if (one) setTimeout(() => $('#note-body').focus(), 60);
+}
+
+$('#btn-item-note').onclick = () => {
   const it = selItem(); if (!it) return;
-  const v = await ask('メモ（空にすると消えます）', it.note || '');
-  if (v === null) return;
-  it.note = v;
-  await dbPut('items', it);
-  const el = itemEl(it.id);
-  if (el) {
-    const old = el.querySelector('.note-tag'); if (old) old.remove();
-    if (v) { const n = document.createElement('div'); n.className = 'note-tag'; n.textContent = v; el.appendChild(n); }
+  if (it.type === 'text') return editTextItem(it);
+  openNoteSheet([it]);
+};
+$('#note-cancel').onclick = closeSheets;
+$('#note-save').onclick = async () => {
+  const targets = NOTE.targets;
+  if (!targets.length) return closeSheets();
+  const one = targets.length === 1 ? targets[0] : null;
+  const note = one ? $('#note-body').value.trim() : null;
+  const desc = one ? $('#note-desc').value.trim() : null;
+  closeSheets();
+  pushHistory();
+  for (const it of targets) {
+    if (one) { it.note = note; it.desc = desc; it.tags = NOTE.tags.slice(); }
+    else {
+      // まとめて付けるときは、もとのタグに足す（消さない）
+      const set = new Set([...(it.tags || []), ...NOTE.tags]);
+      it.tags = [...set];
+    }
+    if (NOTE.section !== '' || one) it.section = NOTE.section;
+    await dbPut('items', it);
+    const el = itemEl(it.id);
+    if (el) el.replaceWith(makeItemEl(it));
   }
   touchBoard();
+  toast(one ? '保存しました' : targets.length + ' 枚に付けました');
 };
 $('#btn-item-move').onclick = openMoveSheet;
 $('#mv-cancel').onclick = closeSheets;
@@ -1401,19 +2184,17 @@ $$('#mv-mode .chip').forEach(b => b.onclick = () => {
   $$('#mv-mode .chip').forEach(x => x.classList.toggle('on', x === b));
 });
 $('#mv-here').onclick = async () => {
-  const it = selItem(); if (!it) return;
+  const ids = mvBulk ? S.picked.slice() : (S.sel ? [S.sel] : []);
+  if (!ids.length) return;
   closeSheets();
-  const copy = { ...it, id: uid(), x: it.x + 24, y: it.y + 24, z: Math.max(0, ...S.items.map(i => i.z || 0)) + 1 };
-  delete copy.trashedAt;
-  await dbPut('items', copy);
-  S.items.push(copy);
-  canvas.appendChild(makeItemEl(copy));
-  selectItem(copy.id);
-  touchBoard();
-  toast('複製しました');
+  const n = await duplicateItems(ids);
+  if (mvBulk) { stopPicking(); mvBulk = false; }
+  else if (n) selectItem(null);
+  toast(n + ' 枚複製しました');
 };
 $('#btn-item-remove').onclick = async () => {
   const it = selItem(); if (!it) return;
+  pushHistory();
   it.trashedAt = nowISO();
   await dbPut('items', it);          // 消さずにゴミ箱へ入れる
   S.items = S.items.filter(i => i.id !== it.id);
@@ -1446,8 +2227,54 @@ $('#menu-png').onclick = () => {
   if (S.view !== 'board') { closeSheets(); return toast('先にボードを開いてください'); }
   closeSheets(); exportBoardPNG();
 };
+/* ゴミ箱を空にする ＝ ここだけが本当に消える場所。
+   どのボードからも使われなくなった画像の実体も消して、容量を返す。 */
+$('#trash-empty-all').onclick = async () => {
+  const all = await dbAll('items');
+  const trashed = all.filter(i => i.trashedAt);
+  if (!trashed.length) return;
+  const ok = await confirmAsk(trashed.length + ' 枚を完全に消します。もう戻せません。');
+  if (!ok) return;
+
+  const before = (navigator.storage && navigator.storage.estimate)
+    ? (await navigator.storage.estimate()).usage || 0 : 0;
+
+  for (const it of trashed) await dbDel('items', it.id);
+
+  // どのボードからも使われていない画像だけを消す
+  const stillUsed = new Set(all.filter(i => !i.trashedAt).map(i => i.imageId).filter(Boolean));
+  const images = await dbAll('images');
+  let gone = 0;
+  for (const rec of images) {
+    if (stillUsed.has(rec.id)) continue;
+    await dbDel('images', rec.id);
+    gone++;
+  }
+  _srcIndex = null;
+  releaseURLs();
+
+  const after = (navigator.storage && navigator.storage.estimate)
+    ? (await navigator.storage.estimate()).usage || 0 : 0;
+  const freed = Math.max(0, before - after);
+
+  clearHistory();   // 戻せないので、戻せるふりをしない
+  closeSheets();
+  if (S.view === 'board' && S.boardId) await openBoard(S.boardId); else await renderHome();
+  toast(trashed.length + ' 枚を完全に消しました'
+    + (gone ? '<br>写真の実体 ' + gone + ' 枚ぶん' : '')
+    + (freed ? '（' + fmtBytes(freed) + ' 空きました）' : ''), 4200);
+};
+
+$('#menu-undo').onclick = async () => { closeSheets(); await undo(); };
+$('#menu-redo').onclick = async () => { closeSheets(); await redo(); };
 $('#menu-trash').onclick = () => { closeSheets(); openTrash(); };
 $('#trash-close').onclick = closeSheets;
+$('#menu-dup').onclick = () => {
+  closeSheets();
+  if (S.view !== 'board') return toast('先にボードを開いてください');
+  findDuplicates();
+};
+$('#dup-close').onclick = closeSheets;
 $('#trash-restore-all').onclick = restoreAllTrash;
 $('#menu-import').onclick = () => { closeSheets(); $('#zip-input').click(); };
 $('#zip-input').onchange = (e) => {
@@ -1488,10 +2315,51 @@ document.addEventListener('keydown', (e) => {
     if (S.view === 'board') return goHome();
   }
   if (S.view !== 'board') return;
+  const meta = e.metaKey || e.ctrlKey;
+
+  if (meta && (e.key === 'z' || e.key === 'Z')) {
+    e.preventDefault();
+    return void (e.shiftKey ? redo() : undo());
+  }
+  if (meta && (e.key === 'a' || e.key === 'A')) {
+    e.preventDefault();
+    if (!S.picking) startPicking(true);
+    S.picked = S.items.map(i => i.id);
+    updatePickUI();
+    return void toast(S.picked.length + ' 枚えらびました');
+  }
+  if (meta && (e.key === 'd' || e.key === 'D')) {
+    e.preventDefault();
+    const ids = S.picking ? S.picked.slice() : (S.sel ? [S.sel] : []);
+    if (!ids.length) return;
+    return void duplicateItems(ids).then(n => toast(n + ' 枚複製しました'));
+  }
+  if (meta) return;   // ここから下はブラウザのショートカットと衝突させない
+
+  // 矢印で細かく動かす（shiftで大きく）
+  if (e.key.startsWith('Arrow') && (S.sel || S.picked.length)) {
+    e.preventDefault();
+    const step = e.shiftKey ? 20 : 2;
+    const list = S.picking ? pickedItems() : [selItem()].filter(Boolean);
+    if (!list.length) return;
+    if (!nudgeSnap) { nudgeSnap = snapshotItems(); }
+    clearTimeout(nudgeTimer);
+    nudgeTimer = setTimeout(() => { if (nudgeSnap) { pushHistory(nudgeSnap); nudgeSnap = null; } }, 600);
+    const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+    const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+    list.forEach(i => { i.x += dx; i.y += dy; updateItemEl(i); });
+    positionHandle();
+    dbPutMany('items', list);
+    return;
+  }
+
   if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel) { e.preventDefault(); $('#btn-item-remove').click(); }
   if (e.key === 'f' || e.key === 'F') fitAll();
   if (e.key === 'a' || e.key === 'A') arrangeMasonry();
+  if (e.key === 'g' || e.key === 'G') $('#btn-view').click();
+  if (e.key === 'Escape' && S.picking) stopPicking();
 });
+let nudgeSnap = null, nudgeTimer = 0;
 
 /* --- PCからのドラッグ&ドロップ --- */
 ['dragover', 'drop'].forEach(t => document.addEventListener(t, e => e.preventDefault()));
@@ -1521,6 +2389,7 @@ window.addEventListener('resize', () => { if (S.view === 'board') positionHandle
       if (!already) await navigator.storage.persist();
     } catch (e) { /* 失敗しても動作はする */ }
   }
+  loadSettings();
   await renderHome();
   // 開発中(localhost)は登録しない。古いキャッシュを掴んで混乱するため
   const isLocal = ['localhost', '127.0.0.1', ''].includes(location.hostname);
@@ -1582,15 +2451,21 @@ async function buildViewerPayload(onProgress) {
     if (i % 5 === 4) await new Promise(res => setTimeout(res, 0));
   }
 
+  const keepItem = (i) => (i.type === 'text' || i.type === 'color') ? true : !!imgMeta[i.imageId];
+
   const data = {
     app: 'MOOD BOARD',
     version: 1,
     exportedAt: nowISO(),
     boards: boards.map(b => ({ id: b.id, name: b.name })),
-    items: items.filter(i => imgMeta[i.imageId]).map(i => ({
+    items: items.filter(keepItem).map(i => ({
       id: i.id, boardId: i.boardId, imageId: i.imageId,
+      type: i.type || 'photo', text: i.text || '',
+      // 色見本の色は hex。color は古いビューアのために残してある
+      hex: i.hex || '', color: i.hex || i.color || '',
       x: Math.round(i.x), y: Math.round(i.y), w: Math.round(i.w), h: Math.round(i.h),
-      z: i.z || 0, note: i.note || '',
+      z: i.z || 0, note: i.note || '', desc: i.desc || '',
+      tags: (i.tags || []).slice(), section: i.section || '',
     })),
     images: imgMeta,
   };
@@ -1618,11 +2493,31 @@ async function buildViewerPayload(onProgress) {
     '写真: ' + targets.length + ' 枚 / ボード: ' + boards.length + ' 個',
   ].join('\n');
 
+  // 同期のための台帳。data.js はビューアが読む用、これは突き合わせる用。
+  const manifest = {
+    app: 'MOOD BOARD',
+    version: 1,
+    updatedAt: nowISO(),
+    boards: boards.map(b => ({ id: b.id, name: b.name, createdAt: b.createdAt, updatedAt: b.updatedAt })),
+    items: items.filter(keepItem).map(i => ({
+      id: i.id, boardId: i.boardId, imageId: i.imageId,
+      type: i.type || 'photo', text: i.text || '',
+      hex: i.hex || '', color: i.hex || i.color || '',
+      x: Math.round(i.x), y: Math.round(i.y), w: Math.round(i.w), h: Math.round(i.h),
+      z: i.z || 0, note: i.note || '', desc: i.desc || '',
+      tags: (i.tags || []).slice(), section: i.section || '',
+      addedAt: i.addedAt || '', trashedAt: i.trashedAt || '',
+      croppedFrom: i.croppedFrom || '', rotFrom: i.rotFrom || '', rot: i.rot || 0,
+    })),
+    images: Object.keys(imgMeta).map(id => ({ id, ...imgMeta[id] })),
+  };
+
   files.unshift(
     { name: 'index.html', data: te.encode(shell['index.html']) },
     { name: 'viewer.css', data: te.encode(shell['viewer.css']) },
     { name: 'viewer.js', data: te.encode(shell['viewer.js']) },
     { name: 'data.js', data: te.encode('const MB_DATA = ' + JSON.stringify(data) + ';\n') },
+    { name: 'manifest.json', data: te.encode(JSON.stringify(manifest, null, 1)) },
     { name: 'README.txt', data: te.encode(readme) },
   );
   return { files, count: targets.length, boards: boards.length };
@@ -1690,16 +2585,20 @@ $('#menu-usb').onclick = () => { closeSheets(); exportUSB(); };
    ボードのまま / 格子 / 1枚ずつ の3通り。A4 たて・よこ。
    ========================================================================== */
 const PAPER = {
-  a4p: { w: 210, h: 297, orient: 'portrait', cols: 3 },
-  a4l: { w: 297, h: 210, orient: 'landscape', cols: 4 },
+  a4p: { w: 210, h: 297, size: 'A4', orient: 'portrait', cols: 3 },
+  a4l: { w: 297, h: 210, size: 'A4', orient: 'landscape', cols: 4 },
+  a3p: { w: 297, h: 420, size: 'A3', orient: 'portrait', cols: 4 },
+  a3l: { w: 420, h: 297, size: 'A3', orient: 'landscape', cols: 5 },
 };
-const PMARGIN = 10;
-const PRINT = { mode: 'board', paper: 'a4p', scope: 'all', note: 'on' };
+const MARGINS = { narrow: 6, normal: 10, wide: 18 };
+const PRINT = { mode: 'board', paper: 'a4p', scope: 'all', note: 'on', margin: 'normal', cols: 'auto', gray: 'off' };
+const pMargin = () => MARGINS[PRINT.margin] != null ? MARGINS[PRINT.margin] : MARGINS.normal;
 
 function setPageStyle(paper) {
   let st = document.getElementById('page-style');
   if (!st) { st = document.createElement('style'); st.id = 'page-style'; document.head.appendChild(st); }
-  st.textContent = '@page{size:A4 ' + PAPER[paper].orient + ';margin:' + PMARGIN + 'mm}';
+  const P = PAPER[paper];
+  st.textContent = '@page{size:' + P.size + ' ' + P.orient + ';margin:' + pMargin() + 'mm}';
 }
 
 function printHead(title, sub) {
@@ -1732,8 +2631,8 @@ function printSrcOf(it) {
 
 function buildPrint() {
   const P = PAPER[PRINT.paper];
-  const availW = P.w - PMARGIN * 2;
-  const availH = P.h - PMARGIN * 2;
+  const availW = P.w - pMargin() * 2;
+  const availH = P.h - pMargin() * 2;
   const headH = 12;
   const withNote = PRINT.note === 'on';
   const bname = S.board ? S.board.name : 'MOOD BOARD';
@@ -1743,6 +2642,7 @@ function buildPrint() {
     : S.items;
   const paper = $('#paper');
   paper.innerHTML = '';
+  paper.classList.toggle('gray', PRINT.gray === 'on');
   setPageStyle(PRINT.paper);
   if (!items.length) return 0;
 
@@ -1764,13 +2664,24 @@ function buildPrint() {
     holder.style.height = bodyH + 'mm';
     items.forEach(it => {
       const d = document.createElement('div');
-      d.className = 'pi';
+      d.className = 'pi' + (it.type === 'text' ? ' pi-text' : '') + (it.type === 'color' ? ' pi-color' : '');
       d.style.left = (offX + (it.x - x1) * sc) + 'mm';
       d.style.top = (offY + (it.y - y1) * sc) + 'mm';
       d.style.width = (it.w * sc) + 'mm';
       d.style.height = (it.h * sc) + 'mm';
-      const g = document.createElement('img'); g.src = printSrcOf(it);
-      d.appendChild(g);
+      if (it.type === 'color') {
+        d.style.background = it.hex || '#888';
+        const t = document.createElement('div');
+        t.className = 'pcolor-hex'; t.textContent = (it.hex || '').toUpperCase();
+        t.style.color = readableOn(it.hex);
+        d.appendChild(t);
+      } else if (it.type === 'text') {
+        const t = document.createElement('div'); t.className = 'ptext-body'; t.textContent = it.text || '';
+        d.appendChild(t);
+      } else {
+        const g = document.createElement('img'); g.src = printSrcOf(it);
+        d.appendChild(g);
+      }
       holder.appendChild(d);
     });
     sheet.appendChild(holder);
@@ -1785,11 +2696,25 @@ function buildPrint() {
       sheet.appendChild(printHead(bname, (n + 1) + ' / ' + items.length));
       const d = document.createElement('div');
       d.className = 'p-one';
-      const g = document.createElement('img'); g.src = printSrcOf(it);
-      d.appendChild(g);
-      if (withNote && it.note) {
-        const c = document.createElement('div'); c.className = 'pcap'; c.textContent = it.note;
-        d.appendChild(c);
+      if (it.type === 'color') {
+        d.classList.add('p-one-color');
+        const sw = document.createElement('div');
+        sw.className = 'pcolor-big';
+        sw.style.background = it.hex || '#888';
+        sw.style.color = readableOn(it.hex);
+        sw.textContent = (it.hex || '').toUpperCase();
+        d.appendChild(sw);
+      } else if (it.type === 'text') {
+        d.classList.add('p-one-text');
+        const t = document.createElement('div'); t.className = 'ptext-body big'; t.textContent = it.text || '';
+        d.appendChild(t);
+      } else {
+        const g = document.createElement('img'); g.src = printSrcOf(it);
+        d.appendChild(g);
+        if (withNote && it.note) {
+          const c = document.createElement('div'); c.className = 'pcap'; c.textContent = it.note;
+          d.appendChild(c);
+        }
       }
       sheet.appendChild(d);
       paper.appendChild(sheet);
@@ -1797,7 +2722,8 @@ function buildPrint() {
     return items.length;
   }
 
-  const cols = P.cols, gap = 4;
+  const cols = PRINT.cols === 'auto' ? P.cols : Math.max(1, parseInt(PRINT.cols, 10) || P.cols);
+  const gap = 4;
   const cellW = (availW - gap * (cols - 1)) / cols;
   const rows = [];
   for (let i = 0; i < items.length; i += cols) rows.push(items.slice(i, i + cols));
@@ -1824,12 +2750,24 @@ function buildPrint() {
     used += rh;
     row.forEach(it => {
       const d = document.createElement('div');
-      d.className = 'pi';
-      const g = document.createElement('img'); g.src = printSrcOf(it);
-      d.appendChild(g);
-      if (withNote && it.note) {
-        const c = document.createElement('div'); c.className = 'pcap'; c.textContent = it.note;
-        d.appendChild(c);
+      d.className = 'pi' + (it.type === 'text' ? ' pi-text' : '') + (it.type === 'color' ? ' pi-color' : '');
+      if (it.type === 'color') {
+        d.style.background = it.hex || '#888';
+        d.style.aspectRatio = '1';
+        const t = document.createElement('div');
+        t.className = 'pcolor-hex'; t.textContent = (it.hex || '').toUpperCase();
+        t.style.color = readableOn(it.hex);
+        d.appendChild(t);
+      } else if (it.type === 'text') {
+        const t = document.createElement('div'); t.className = 'ptext-body'; t.textContent = it.text || '';
+        d.appendChild(t);
+      } else {
+        const g = document.createElement('img'); g.src = printSrcOf(it);
+        d.appendChild(g);
+        if (withNote && it.note) {
+          const c = document.createElement('div'); c.className = 'pcap'; c.textContent = it.note;
+          d.appendChild(c);
+        }
       }
       holder.appendChild(d);
     });
@@ -1861,31 +2799,61 @@ function suggestPaper() {
   PRINT.paper = ((x2 - x1) / Math.max(1, y2 - y1)) > 1.15 ? 'a4l' : 'a4p';
 }
 
+const PRINT_CHIPS = [['#pc-mode', 'mode'], ['#pc-paper', 'paper'], ['#pc-margin', 'margin'],
+                     ['#pc-cols', 'cols'], ['#pc-scope', 'scope'], ['#pc-note', 'note'], ['#pc-gray', 'gray']];
+
 function syncPrintChips() {
-  [['#pc-mode', 'mode'], ['#pc-paper', 'paper'], ['#pc-scope', 'scope'], ['#pc-note', 'note']]
-    .forEach(([sel, key]) => {
-      $$(sel + ' .chip').forEach(b => b.classList.toggle('on', b.dataset.v === PRINT[key]));
-    });
+  PRINT_CHIPS.forEach(([sel, key]) => {
+    $$(sel + ' .chip').forEach(b => b.classList.toggle('on', b.dataset.v === PRINT[key]));
+  });
   $$('#pc-scope .chip').forEach(b => {
     if (b.dataset.v === 'picked') {
       b.disabled = S.picked.length === 0;
       if (b.disabled && PRINT.scope === 'picked') { PRINT.scope = 'all'; }
     }
   });
+  // 「1行に何枚」は格子のときだけ意味がある
+  $('#pc-cols-row').hidden = PRINT.mode !== 'grid';
+  updatePrintCount();
 }
-[['#pc-mode', 'mode'], ['#pc-paper', 'paper'], ['#pc-scope', 'scope'], ['#pc-note', 'note']]
-  .forEach(([sel, key]) => {
-    $$(sel + ' .chip').forEach(b => b.onclick = () => {
-      PRINT[key] = b.dataset.v;
-      if (key === 'paper') paperTouched = true;
-      syncPrintChips();
-    });
+
+/* 印刷する前に、何ページになるかを出しておく（紙を無駄にしないため） */
+function updatePrintCount() {
+  const el = $('#print-count');
+  if (!el) return;
+  let pages = 0;
+  try { pages = buildPrint(); } catch (e) { pages = 0; }
+  const P = PAPER[PRINT.paper];
+  el.innerHTML = pages
+    ? '<b>' + pages + ' ページ</b>になります（' + P.size + ' ' + (P.orient === 'portrait' ? 'たて' : 'よこ') + '）'
+    : '印刷するものがありません';
+}
+
+PRINT_CHIPS.forEach(([sel, key]) => {
+  $$(sel + ' .chip').forEach(b => b.onclick = () => {
+    PRINT[key] = b.dataset.v;
+    if (key === 'paper') paperTouched = true;
+    syncPrintChips();
   });
+});
 
 $('#menu-print').onclick = () => {
   if (S.view !== 'board') { closeSheets(); return toast('先にボードを開いてください'); }
   suggestPaper();
+  PRINT.scope = 'all';
   syncPrintChips();
+  $('#sheet-print').querySelector('h2').textContent = '印刷 / PDF';
+  openSheet('#sheet-print');
+};
+
+/* 選んでいる状態から直接。ここまで来た人は「選んだものだけ」を出したいので、
+   対象を先に立てておく（≡ → 印刷 → 対象を切り替える、の3手を省く） */
+$('#btn-bulk-print').onclick = () => {
+  if (!S.picked.length) return;
+  suggestPaper();
+  PRINT.scope = 'picked';
+  syncPrintChips();
+  $('#sheet-print').querySelector('h2').textContent = '選んだ ' + S.picked.length + ' つを出す';
   openSheet('#sheet-print');
 };
 $('#print-cancel').onclick = closeSheets;
@@ -1987,11 +2955,117 @@ async function ensureColors(showProgress) {
   return need.length;
 }
 
+/* ==========================================================================
+   重複をさがす
+   見た目が近い写真を平均ハッシュ（aHash）で見つけてまとめる。
+   写真そのものは消さず、ゴミ箱に入れるだけ（いつでも戻せる）。
+   ========================================================================== */
+async function hashImage(rec) {
+  if (rec.ahash) return rec.ahash;
+  try {
+    const bmp = await createImageBitmap(rec.thumb || rec.full);
+    const N = 8;
+    const c = document.createElement('canvas'); c.width = N; c.height = N;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0, N, N);
+    bmp.close && bmp.close();
+    const d = ctx.getImageData(0, 0, N, N).data;
+    const gray = [];
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+      gray.push(g); sum += g;
+    }
+    const avg = sum / gray.length;
+    const bits = gray.map(g => (g > avg ? '1' : '0')).join('');
+    rec.ahash = bits;
+    await dbPut('images', rec);
+    return bits;
+  } catch (e) { return null; }
+}
+function hamming(a, b) {
+  if (!a || !b || a.length !== b.length) return 64;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++;
+  return d;
+}
+async function findDuplicates() {
+  const recs = [...S.imgs.values()];
+  if (recs.length < 2) { toast('写真が少ないので見つかりません'); return; }
+  progCancelled = false;
+  progOpen('似た写真をさがしています');
+  for (let i = 0; i < recs.length; i++) {
+    if (progCancelled) break;
+    progSet(i, recs.length, (i + 1) + ' / ' + recs.length);
+    await hashImage(recs[i]);
+    if (i % 6 === 5) await new Promise(r => setTimeout(r, 0));
+  }
+  progClose();
+
+  const parent = new Map(recs.map(r => [r.id, r.id]));
+  const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+  for (let i = 0; i < recs.length; i++) {
+    for (let j = i + 1; j < recs.length; j++) {
+      if (hamming(recs[i].ahash, recs[j].ahash) <= 4) union(recs[i].id, recs[j].id);
+    }
+  }
+  const groups = new Map();
+  for (const r of recs) {
+    const root = find(r.id);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(r);
+  }
+  renderDupSheet([...groups.values()].filter(g => g.length >= 2));
+}
+function renderDupSheet(groups) {
+  const box = $('#dup-groups');
+  box.innerHTML = '';
+  $('#dup-empty').hidden = groups.length > 0;
+  groups.forEach(group => {
+    group.sort((a, b) => (b.full.size || 0) - (a.full.size || 0));
+    const row = document.createElement('div');
+    row.className = 'dup-row';
+    group.forEach((rec, idx) => {
+      const cell = document.createElement('div');
+      cell.className = 'dup-cell' + (idx === 0 ? ' keep' : '');
+      const im = document.createElement('img');
+      im.src = blobURL(rec.id, 't', rec.thumb || rec.full);
+      cell.appendChild(im);
+      if (idx === 0) {
+        const tag = document.createElement('div'); tag.className = 'dup-tag'; tag.textContent = '残す候補';
+        cell.appendChild(tag);
+      } else {
+        const btn = document.createElement('button');
+        btn.className = 'dup-x'; btn.textContent = 'ゴミ箱へ';
+        btn.onclick = async () => {
+          const targets = S.items.filter(i => i.imageId === rec.id && !i.trashedAt);
+          if (!targets.length) return;
+          pushHistory();
+          const ids = new Set(targets.map(i => i.id));
+          for (const it of targets) { it.trashedAt = nowISO(); await dbPut('items', it); }
+          S.items = S.items.filter(i => !ids.has(i.id));
+          targets.forEach(it => { const el = itemEl(it.id); if (el) el.remove(); });
+          cell.remove();
+          $('#board-empty').hidden = S.items.length > 0;
+          renderPalette(); touchBoard();
+          toast('ゴミ箱に入れました');
+        };
+        cell.appendChild(btn);
+      }
+      row.appendChild(cell);
+    });
+    box.appendChild(row);
+  });
+  openSheet('#sheet-dup');
+}
+
 /* 色順に並べる。無彩色は最後にまとめて明るさ順 */
 async function arrangeByColor() {
   if (!S.items.length) return;
   progCancelled = false;
   await ensureColors(true);
+  pushHistory();
 
   const keyed = S.items.map(it => {
     const rec = S.imgs.get(it.imageId);
@@ -2002,7 +3076,7 @@ async function arrangeByColor() {
   const grays = keyed.filter(k => k.gray).sort((a, b) => b.dom.l - a.dom.l);
   const order = [...colored, ...grays].map(k => k.it);
 
-  const colW = BASE_W, gap = 20, n = order.length;
+  const colW = BASE_W, gap = gapPx(), n = order.length;
   const wrapEl = $('#canvas-wrap');
   const ratio = wrapEl.clientWidth / Math.max(1, wrapEl.clientHeight);
   const avgH = order.reduce((a, i) => a + (i.h / i.w) * colW, 0) / n;
@@ -2063,6 +3137,44 @@ function renderPalette() {
   box.hidden = false;
 }
 
+/* 「文字を置く」ノートを合成先のcanvasに描く（改行はそのまま、はみ出た分は折り返す） */
+function wrapCanvasText(ctx, text, maxWidth) {
+  const lines = [];
+  for (const para of String(text).split('\n')) {
+    let line = '';
+    for (const ch of para) {
+      const test = line + ch;
+      if (line && ctx.measureText(test).width > maxWidth) { lines.push(line); line = ch; }
+      else line = test;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+function drawTextCardToCanvas(ctx, it, x, y, w, h, scale) {
+  ctx.save();
+  if (SET.shadow === 'on') {
+    ctx.shadowColor = 'rgba(0,0,0,.5)';
+    ctx.shadowBlur = 14 * scale;
+    ctx.shadowOffsetY = 5 * scale;
+  }
+  ctx.fillStyle = '#f4ecd0';
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+  ctx.fillStyle = '#2a2415';
+  const fs = Math.max(10, 14 * scale);
+  ctx.font = fs + 'px -apple-system,"Hiragino Sans",sans-serif';
+  ctx.textBaseline = 'top';
+  const pad = 12 * scale;
+  const lines = wrapCanvasText(ctx, it.text || '', w - pad * 2);
+  let ty = y + pad;
+  for (const ln of lines) {
+    if (ty > y + h - pad) break;
+    ctx.fillText(ln, x + pad, ty);
+    ty += fs * 1.4;
+  }
+}
+
 /* ==========================================================================
    ボードを1枚の画像にする
    印刷までしたくない場面用。LINEやメールでそのまま渡せる。
@@ -2082,15 +3194,16 @@ async function exportBoardPNG() {
     const c = document.createElement('canvas');
     c.width = W; c.height = H;
     const ctx = c.getContext('2d');
-    ctx.fillStyle = '#0d0d0f';
+    const bp = bgPreset();
+    ctx.fillStyle = bp.bg;
     ctx.fillRect(0, 0, W, H);
 
     // 見出し
-    ctx.fillStyle = '#ececed';
+    ctx.fillStyle = bp.fg;
     ctx.font = '600 ' + Math.round(26 * scale) + 'px -apple-system,"Hiragino Sans",sans-serif';
     ctx.textBaseline = 'middle';
     ctx.fillText(S.board.name, PAD * scale, HEAD * scale * 0.45);
-    ctx.fillStyle = '#8b8b93';
+    ctx.fillStyle = bp.sub;
     ctx.font = Math.round(15 * scale) + 'px ui-monospace,Menlo,monospace';
     ctx.fillText(S.items.length + ' photos   ' + new Date().toLocaleDateString('ja-JP'),
       PAD * scale, HEAD * scale * 0.78);
@@ -2113,17 +3226,40 @@ async function exportBoardPNG() {
       if (progCancelled) { progClose(); return; }
       progSet(i, ordered.length, (i + 1) + ' / ' + ordered.length);
       const it = ordered[i];
-      const rec = S.imgs.get(it.imageId);
-      if (!rec) continue;
       const x = (it.x - b.x1 + PAD) * scale;
       const y = (it.y - b.y1 + PAD) * scale + HEAD * scale;
       const w = it.w * scale, h = it.h * scale;
+      if (it.type === 'color') {
+        ctx.save();
+        if (SET.shadow === 'on') {
+          ctx.shadowColor = 'rgba(0,0,0,.5)';
+          ctx.shadowBlur = 14 * scale;
+          ctx.shadowOffsetY = 5 * scale;
+        }
+        ctx.fillStyle = it.hex || '#888';
+        ctx.fillRect(x, y, w, h);
+        ctx.restore();
+        ctx.fillStyle = readableOn(it.hex);
+        ctx.font = Math.round(13 * scale) + 'px ui-monospace,Menlo,monospace';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText((it.hex || '').toUpperCase(), x + 10 * scale, y + h - 11 * scale);
+        continue;
+      }
+      if (it.type === 'text') {
+        drawTextCardToCanvas(ctx, it, x, y, w, h, scale);
+        if (i % 4 === 3) await new Promise(r => setTimeout(r, 0));
+        continue;
+      }
+      const rec = S.imgs.get(it.imageId);
+      if (!rec) continue;
       try {
         const bmp = await createImageBitmap(rec.full);
         ctx.save();
-        ctx.shadowColor = 'rgba(0,0,0,.55)';
-        ctx.shadowBlur = 18 * scale;
-        ctx.shadowOffsetY = 6 * scale;
+        if (SET.shadow === 'on') {
+          ctx.shadowColor = 'rgba(0,0,0,.55)';
+          ctx.shadowBlur = 18 * scale;
+          ctx.shadowOffsetY = 6 * scale;
+        }
         ctx.drawImage(bmp, x, y, w, h);
         ctx.restore();
         bmp.close && bmp.close();
@@ -2157,9 +3293,19 @@ async function exportBoardPNG() {
    ========================================================================== */
 let mvMode = 'move';
 
-async function openMoveSheet() {
-  const it = selItem();
-  if (!it) return;
+let mvBulk = false;
+async function openBulkMoveSheet() {
+  if (!S.picked.length) return;
+  mvBulk = true;
+  await openMoveSheet(true);
+}
+async function openMoveSheet(bulk) {
+  if (!bulk) {
+    mvBulk = false;
+    const it = selItem();
+    if (!it) return;
+  }
+  $('#mv-here span b').textContent = mvBulk ? 'このボードの中で複製（' + S.picked.length + ' 枚）' : 'このボードの中で複製';
   mvMode = 'move';
   $$('#mv-mode .chip').forEach(b => b.classList.toggle('on', b.dataset.v === 'move'));
 
@@ -2197,28 +3343,148 @@ async function openMoveSheet() {
 }
 
 async function moveItemTo(boardId) {
-  const it = selItem();
-  if (!it) return;
+  const ids = mvBulk ? S.picked.slice() : (S.sel ? [S.sel] : []);
+  if (!ids.length) return;
   closeSheets();
-  if (mvMode === 'copy') {
-    const copy = { ...it, id: uid(), boardId, z: Date.now() % 100000, trashedAt: undefined };
-    delete copy.trashedAt;
-    await dbPut('items', copy);
-    toast('コピーしました');
-  } else {
-    it.boardId = boardId;
-    await dbPut('items', it);
-    S.items = S.items.filter(i => i.id !== it.id);
-    const el = itemEl(it.id); if (el) el.remove();
+  pushHistory();
+  let n = 0;
+  for (const id of ids) {
+    const it = S.items.find(i => i.id === id);
+    if (!it) continue;
+    if (mvMode === 'copy') {
+      const copy = { ...it, id: uid(), boardId, z: Date.now() % 100000 + n };
+      delete copy.trashedAt;
+      await dbPut('items', copy);
+    } else {
+      it.boardId = boardId;
+      await dbPut('items', it);
+      S.items = S.items.filter(i => i.id !== it.id);
+      const el = itemEl(it.id); if (el) el.remove();
+    }
+    n++;
+  }
+  if (mvMode !== 'copy') {
     selectItem(null);
     $('#board-empty').hidden = S.items.length > 0;
     renderPalette();
-    toast('移しました');
   }
+  if (mvBulk) stopPicking();
+  mvBulk = false;
   const b = await dbGet('boards', boardId);
   if (b) { b.updatedAt = nowISO(); await dbPut('boards', b); }
   touchBoard();
+  toast(n + ' 枚' + (mvMode === 'copy' ? 'コピーしました' : '移しました'));
 }
+
+/* --- 複数選択のときの操作 --- */
+$('#btn-bulk-move').onclick = openBulkMoveSheet;
+
+async function duplicateItems(ids) {
+  const maxZ0 = Math.max(0, ...S.items.map(i => i.z || 0));
+  let zk = 1;
+  const copies = [];
+  for (const id of ids) {
+    const it = S.items.find(i => i.id === id);
+    if (!it) continue;
+    const copy = { ...it, id: uid(), x: it.x + 26, y: it.y + 26, z: maxZ0 + zk++ };
+    delete copy.trashedAt;
+    copies.push(copy);
+  }
+  if (!copies.length) return 0;
+  pushHistory();
+  await dbPutMany('items', copies);
+  S.items.push(...copies);
+  copies.forEach(c => canvas.appendChild(makeItemEl(c)));
+  touchBoard();
+  return copies.length;
+}
+
+/* ========================== そろえる =====================================
+   選んだものを、きれいな位置関係に置き直す。
+   ========================================================================== */
+const pickedItems = () => S.picked.map(id => S.items.find(i => i.id === id)).filter(Boolean);
+
+async function applyAlign(mode) {
+  const list = pickedItems();
+  if (list.length < 2) return toast('2枚以上えらんでください');
+  if ((mode === 'distx' || mode === 'disty') && list.length < 3) {
+    return toast('等間隔にするには3枚以上えらんでください');
+  }
+  pushHistory();
+  const gap = gapPx();
+  const L = Math.min(...list.map(i => i.x));
+  const R = Math.max(...list.map(i => i.x + i.w));
+  const T = Math.min(...list.map(i => i.y));
+  const B = Math.max(...list.map(i => i.y + i.h));
+  const CX = (L + R) / 2, CY = (T + B) / 2;
+
+  if (mode === 'left') list.forEach(i => i.x = Math.round(L));
+  else if (mode === 'right') list.forEach(i => i.x = Math.round(R - i.w));
+  else if (mode === 'cx') list.forEach(i => i.x = Math.round(CX - i.w / 2));
+  else if (mode === 'top') list.forEach(i => i.y = Math.round(T));
+  else if (mode === 'bottom') list.forEach(i => i.y = Math.round(B - i.h));
+  else if (mode === 'cy') list.forEach(i => i.y = Math.round(CY - i.h / 2));
+  else if (mode === 'distx') {
+    const s = [...list].sort((a, b) => a.x - b.x);
+    const space = (R - L - s.reduce((n, i) => n + i.w, 0)) / (s.length - 1);
+    let x = L;
+    s.forEach(i => { i.x = Math.round(x); x += i.w + space; });
+  } else if (mode === 'disty') {
+    const s = [...list].sort((a, b) => a.y - b.y);
+    const space = (B - T - s.reduce((n, i) => n + i.h, 0)) / (s.length - 1);
+    let y = T;
+    s.forEach(i => { i.y = Math.round(y); y += i.h + space; });
+  } else if (mode === 'samew') {
+    const w = Math.round(list.reduce((n, i) => n + i.w, 0) / list.length);
+    list.forEach(i => { const r = i.h / i.w; i.w = w; i.h = Math.round(w * r); });
+  } else if (mode === 'sameh') {
+    const h = Math.round(list.reduce((n, i) => n + i.h, 0) / list.length);
+    list.forEach(i => { const r = i.w / i.h; i.h = h; i.w = Math.round(h * r); });
+  } else if (mode === 'row') {
+    const s = [...list].sort((a, b) => a.x - b.x);
+    let x = L;
+    s.forEach(i => { i.x = Math.round(x); i.y = Math.round(CY - i.h / 2); x += i.w + gap; });
+  } else if (mode === 'col') {
+    const s = [...list].sort((a, b) => a.y - b.y);
+    let y = T;
+    s.forEach(i => { i.y = Math.round(y); i.x = Math.round(CX - i.w / 2); y += i.h + gap; });
+  } else if (mode === 'stack') {
+    [...list].forEach((i, n) => { i.x = Math.round(L + n * 18); i.y = Math.round(T + n * 18); });
+  }
+
+  list.forEach(updateItemEl);
+  await dbPutMany('items', list);
+  touchBoard();
+}
+
+$('#btn-bulk-align').onclick = () => {
+  if (S.picked.length < 2) return toast('2枚以上えらんでください');
+  $('#align-n').textContent = S.picked.length;
+  openSheet('#sheet-align');
+};
+$$('#sheet-align .chip[data-align]').forEach(b => b.onclick = () => applyAlign(b.dataset.align));
+$('#align-close').onclick = closeSheets;
+$('#btn-bulk-trash').onclick = async () => {
+  if (!S.picked.length) return;
+  const n = S.picked.length;
+  const ok = await confirmAsk(n + ' 枚をゴミ箱に入れます');
+  if (!ok) return;
+  pushHistory();
+  const ids = new Set(S.picked);
+  for (const id of ids) {
+    const it = S.items.find(i => i.id === id);
+    if (!it) continue;
+    it.trashedAt = nowISO();
+    await dbPut('items', it);
+  }
+  S.items = S.items.filter(i => !ids.has(i.id));
+  stopPicking();
+  if (S.mode === 'grid') renderGrid(); else renderCanvas();
+  $('#board-empty').hidden = S.items.length > 0;
+  renderPalette();
+  touchBoard();
+  toast(n + ' 枚をゴミ箱に入れました');
+};
 
 /* ==========================================================================
    ゴミ箱
@@ -2230,31 +3496,41 @@ async function openTrash() {
   const grid = $('#trash-grid');
   grid.innerHTML = '';
   for (const it of trashed) {
-    const rec = await dbGet('images', it.imageId);
+    const rec = it.imageId ? await dbGet('images', it.imageId) : null;
     const cell = document.createElement('div');
     cell.className = 'tr-cell';
-    const im = document.createElement('img');
-    if (rec) im.src = blobURL(rec.id, 't', rec.thumb || rec.full);
+    if (it.type === 'text') {
+      const t = document.createElement('div'); t.className = 'tr-text'; t.textContent = it.text || '';
+      cell.appendChild(t);
+    } else {
+      const im = document.createElement('img');
+      if (rec) im.src = blobURL(rec.id, 't', rec.thumb || rec.full);
+      cell.appendChild(im);
+    }
     const btn = document.createElement('button');
     btn.textContent = 'もどす';
     btn.onclick = () => restoreItem(it.id);
-    cell.append(im, btn);
+    cell.appendChild(btn);
     grid.appendChild(cell);
   }
   $('#trash-empty').hidden = trashed.length > 0;
   $('#trash-restore-all').hidden = trashed.length === 0;
+  $('#trash-empty-all').hidden = trashed.length === 0;
   openSheet('#sheet-trash');
 }
 
 async function restoreItem(id) {
   const it = await dbGet('items', id);
   if (!it) return;
+  pushHistory();
   delete it.trashedAt;
   it.z = Math.max(0, ...S.items.map(i => i.z || 0)) + 1;
   await dbPut('items', it);
   S.items.push(it);
-  const rec = await dbGet('images', it.imageId);
-  if (rec) S.imgs.set(rec.id, rec);
+  if (it.imageId) {
+    const rec = await dbGet('images', it.imageId);
+    if (rec) S.imgs.set(rec.id, rec);
+  }
   canvas.appendChild(makeItemEl(it));
   $('#board-empty').hidden = true;
   touchBoard();
@@ -2266,6 +3542,7 @@ async function restoreItem(id) {
 async function restoreAllTrash() {
   const all = await dbByIndex('items', 'boardId', S.boardId);
   const trashed = all.filter(i => i.trashedAt);
+  if (trashed.length) pushHistory();
   for (const it of trashed) {
     delete it.trashedAt;
     await dbPut('items', it);
@@ -2285,30 +3562,49 @@ function renderGrid() {
   // 新しく入れたものが上に来るほうが探しやすい
   const list = [...S.items].sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || '') || (b.z || 0) - (a.z || 0));
   list.forEach((it, n) => {
-    const rec = S.imgs.get(it.imageId);
     const cell = document.createElement('div');
-    cell.className = 'gcell';
+    cell.className = 'gcell' + (it.type === 'text' ? ' gtext' : '') + (it.type === 'color' ? ' gcolor' : '');
     cell.dataset.id = it.id;
     cell.style.setProperty('--dl', Math.min(n * 22, 420) + 'ms');
-    const im = document.createElement('img');
-    im.loading = 'lazy';
-    // 読み込み前に高さを確保して、がたつかせない
-    im.width = it.w; im.height = it.h;
-    if (rec) im.src = blobURL(rec.id, 't', rec.thumb || rec.full);
-    cell.appendChild(im);
-    if (it.note) {
-      const nt = document.createElement('div');
-      nt.className = 'gnote';
-      nt.textContent = it.note;
-      cell.appendChild(nt);
+    if (it.type === 'color') {
+      cell.style.aspectRatio = '1';
+      cell.style.background = it.hex || '#888';
+      const t = document.createElement('div');
+      t.className = 'sw-hex';
+      t.textContent = (it.hex || '').toUpperCase();
+      t.style.color = readableOn(it.hex);
+      cell.appendChild(t);
+    } else if (it.type === 'text') {
+      cell.style.aspectRatio = (it.w / it.h).toFixed(3);
+      const t = document.createElement('div');
+      t.className = 'gtext-body';
+      t.textContent = it.text || '';
+      cell.appendChild(t);
+    } else {
+      const rec = S.imgs.get(it.imageId);
+      const im = document.createElement('img');
+      im.loading = 'lazy';
+      // 読み込み前に高さを確保して、がたつかせない
+      im.width = it.w; im.height = it.h;
+      if (rec) im.src = blobURL(rec.id, 't', rec.thumb || rec.full);
+      cell.appendChild(im);
+      if (it.note) {
+        const nt = document.createElement('div');
+        nt.className = 'gnote';
+        nt.textContent = it.note;
+        cell.appendChild(nt);
+      }
     }
     cell.onclick = () => {
       if (S.picking) { togglePick(it.id); syncGridPick(); }
+      else if (it.type === 'text') editTextItem(it);
+      else if (it.type === 'color') copyHex(it.hex);
       else openViewer(it);
     };
     box.appendChild(cell);
   });
   syncGridPick();
+  applyFilter();
 }
 
 function syncGridPick() {
@@ -2353,3 +3649,921 @@ function setViewMode(mode) {
 }
 
 $('#btn-view').onclick = () => setViewMode(S.mode === 'grid' ? 'canvas' : 'grid');
+
+/* ==========================================================================
+   USBとつなぐ
+   USBの中の MOOD BOARD フォルダを台帳（manifest.json）で突き合わせ、
+   まだ無い写真だけをやりとりする。どちらに何が無いかが一目で分かるように。
+   ※ フォルダに直接つなげるのは PCのChrome/Edge のみ（File System Access API）
+   ========================================================================== */
+const USB_FOLDER = 'MOOD BOARD';
+
+/* 写真を持たないもの（文字カード・色見本）。imageId で突き合わせる所からは漏れるので、
+   どこで数えるときも必ずこれを通す */
+const isCardItem = (i) => i.type === 'text' || i.type === 'color';
+
+/* 「3 枚」「3 枚 ＋ カード 2 つ」のように出す */
+function countLabel(photos, cards) {
+  return photos + ' 枚' + (cards ? ' ＋ カード ' + cards + ' つ' : '');
+}
+let usbRoot = null;      // MOOD BOARD フォルダ
+let usbManifest = null;
+let usbDiff = null;
+
+const fsOK = () => typeof window.showDirectoryPicker === 'function';
+
+/* 選んだフォルダを覚えておく（次回は選び直さずに済む） */
+async function saveUsbHandle(handle) {
+  try { await dbPut('meta', { key: 'usbHandle', value: handle, name: handle.name, at: nowISO() }); }
+  catch (e) { /* 保存できない環境でも動作は続ける */ }
+}
+async function loadUsbHandle() {
+  try { return await dbGet('meta', 'usbHandle'); } catch (e) { return null; }
+}
+
+async function ensurePermission(handle, mode = 'readwrite') {
+  if (!handle) return false;
+  const q = await handle.queryPermission({ mode });
+  if (q === 'granted') return true;
+  const r = await handle.requestPermission({ mode });
+  return r === 'granted';
+}
+
+/* 選んだフォルダの中から MOOD BOARD を探す。無ければそれ自身が中身か確認 */
+async function resolveUsbRoot(dir, create = false) {
+  // 選んだのが MOOD BOARD フォルダそのものだった場合
+  try {
+    await dir.getFileHandle('manifest.json');
+    return dir;
+  } catch (e) { /* 次へ */ }
+  try {
+    return await dir.getDirectoryHandle(USB_FOLDER, { create });
+  } catch (e) {
+    return create ? await dir.getDirectoryHandle(USB_FOLDER, { create: true }) : null;
+  }
+}
+
+async function pickUSB() {
+  if (!fsOK()) return;
+  let dir;
+  try {
+    dir = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'desktop' });
+  } catch (e) { return; }         // 選ばずに閉じた
+  await saveUsbHandle(dir);
+  usbRoot = await resolveUsbRoot(dir, false) || dir;
+  usbRoot._parent = dir;
+  await refreshUsb(dir);
+}
+
+async function reconnectUSB() {
+  const rec = await loadUsbHandle();
+  if (!rec || !rec.value) return toast('前回のUSBが見つかりません');
+  const ok = await ensurePermission(rec.value);
+  if (!ok) return toast('USBへのアクセスが許可されませんでした');
+  usbRoot = await resolveUsbRoot(rec.value, false) || rec.value;
+  usbRoot._parent = rec.value;
+  await refreshUsb(rec.value);
+}
+
+/* USBの台帳を読む */
+async function readUsbManifest() {
+  if (!usbRoot) return null;
+  try {
+    const fh = await usbRoot.getFileHandle('manifest.json');
+    const txt = await (await fh.getFile()).text();
+    return JSON.parse(txt);
+  } catch (e) { return null; }
+}
+
+/* 突き合わせる */
+async function computeUsbDiff() {
+  const localImgs = await dbAll('images');
+  const localIds = new Set(localImgs.map(r => r.id));
+  const m = usbManifest;
+  const usbImgs = (m && m.images) || [];
+  const usbIds = new Set(usbImgs.map(i => i.id));
+
+  // 文字カードと色見本は写真を持たないので、画像の突き合わせからは漏れる。
+  // 別に数えておかないと「書き出したのに戻ってこない」状態になる。
+  const localCards = (await dbAll('items')).filter(isCardItem);
+  const localCardIds = new Set(localCards.map(i => i.id));
+  const usbCards = ((m && m.items) || []).filter(isCardItem);
+  const usbCardIds = new Set(usbCards.map(i => i.id));
+
+  return {
+    pull: usbImgs.filter(i => !localIds.has(i.id)),          // USBにあって手元に無い
+    push: localImgs.filter(r => !usbIds.has(r.id)),          // 手元にあってUSBに無い
+    same: usbImgs.filter(i => localIds.has(i.id)),
+    pullCards: usbCards.filter(i => !localCardIds.has(i.id)),
+    pushCards: localCards.filter(i => !usbCardIds.has(i.id)),
+    hasManifest: !!m,
+  };
+}
+
+async function refreshUsb(parentDir) {
+  progOpen('USBを調べています');
+  try {
+    usbManifest = await readUsbManifest();
+    usbDiff = await computeUsbDiff();
+    progClose();
+    renderUsbPanel(parentDir);
+  } catch (e) {
+    progClose();
+    toast('USBを読めませんでした<br>' + e.message);
+  }
+}
+
+function renderUsbPanel(parentDir) {
+  $('#usb-intro').hidden = true;
+  $('#usb-panel').hidden = false;
+  const label = (parentDir && parentDir.name ? parentDir.name + ' / ' : '') + USB_FOLDER;
+  $('#usb-name').textContent = usbDiff.hasManifest ? label : label + '（まだ空）';
+  $('#usb-empty').hidden = usbDiff.hasManifest;
+
+  // USB → この端末
+  const pull = usbDiff.pull, pullCards = usbDiff.pullCards || [];
+  $('#usb-pull-group').hidden = pull.length === 0 && pullCards.length === 0;
+  $('#usb-pull-n').textContent = countLabel(pull.length, pullCards.length);
+  fillUsbThumbs($('#usb-pull-thumbs'), pull, 'usb');
+
+  // この端末 → USB
+  const push = usbDiff.push, pushCards = usbDiff.pushCards || [];
+  $('#usb-push-group').hidden = push.length === 0 && pushCards.length === 0;
+  $('#usb-push-n').textContent = countLabel(push.length, pushCards.length);
+  fillUsbThumbs($('#usb-push-thumbs'), push, 'local');
+
+  $('#usb-same-group').hidden = usbDiff.same.length === 0;
+  $('#usb-same-n').textContent = usbDiff.same.length + ' 枚';
+
+  if (!pull.length && !push.length && !pullCards.length && !pushCards.length && usbDiff.hasManifest) {
+    toast('ぜんぶ揃っています');
+  }
+}
+
+/* 未同期のサムネを並べる（多いときは頭だけ） */
+const usbThumbURLs = [];
+async function fillUsbThumbs(box, list, kind) {
+  box.innerHTML = '';
+  const LIMIT = 18;
+  let imgDir = null;
+  if (kind === 'usb') {
+    try { imgDir = await usbRoot.getDirectoryHandle('images'); } catch (e) { }
+  }
+  for (const entry of list.slice(0, LIMIT)) {
+    const im = document.createElement('img');
+    box.appendChild(im);
+    if (kind === 'local') {
+      im.src = blobURL(entry.id, 't', entry.thumb || entry.full);
+    } else if (imgDir) {
+      try {
+        const f = await (await imgDir.getFileHandle(entry.file.split('/').pop())).getFile();
+        const u = URL.createObjectURL(f);
+        usbThumbURLs.push(u);
+        im.src = u;
+      } catch (e) { im.className = 'ph2'; }
+    } else im.className = 'ph2';
+  }
+  if (list.length > LIMIT) {
+    const more = document.createElement('div');
+    more.className = 'more';
+    more.textContent = 'ほか ' + (list.length - LIMIT) + ' 枚';
+    box.appendChild(more);
+  }
+}
+function releaseUsbThumbs() {
+  usbThumbURLs.forEach(u => URL.revokeObjectURL(u));
+  usbThumbURLs.length = 0;
+}
+
+/* ---------- USB → この端末 ---------- */
+async function pullFromUSB() {
+  if (!usbRoot || !usbDiff) return;
+  if (!usbDiff.pull.length && !(usbDiff.pullCards || []).length) return;
+  progOpen('USBから取り込んでいます');
+  progCancelled = false;
+  let ok = 0, ng = 0;
+  try {
+    // カードだけの差分なら images フォルダが無いこともある
+    let imgDir = null;
+    try { imgDir = await usbRoot.getDirectoryHandle('images'); }
+    catch (e) { imgDir = null; }
+    const list = imgDir ? usbDiff.pull : [];
+    for (let i = 0; i < list.length; i++) {
+      if (progCancelled) break;
+      progSet(i, list.length, (i + 1) + ' / ' + list.length + ' 枚');
+      const meta = list[i];
+      try {
+        const file = await (await imgDir.getFileHandle(meta.file.split('/').pop())).getFile();
+        // サムネは手元で作り直す（USBには置いていない）
+        let thumb = file;
+        try {
+          const dec = await decodeImage(file);
+          thumb = await canvasToBlob(drawCanvas(dec.src, dec.w, dec.h, THUMB_EDGE), pickType(), THUMB_Q);
+          dec.close();
+        } catch (e) { /* サムネが作れなくても本体があればよい */ }
+        await dbPut('images', {
+          id: meta.id, full: file, thumb,
+          w: meta.w, h: meta.h, srcUrl: meta.srcUrl || '', addedAt: meta.addedAt || nowISO(),
+          hex: meta.hex, dom: (meta.hue !== undefined ? { h: meta.hue, s: meta.sat, l: meta.lum } : undefined),
+        });
+        ok++;
+      } catch (e) { ng++; }
+      if (i % 4 === 3) await new Promise(r => setTimeout(r, 0));
+    }
+
+    // ボードと配置も、手元に無いものを足す
+    const m = usbManifest || {};
+    const haveBoards = new Set((await dbAll('boards')).map(b => b.id));
+    const newBoards = (m.boards || []).filter(b => !haveBoards.has(b.id));
+    for (const b of newBoards) await dbPut('boards', { ...b, updatedAt: nowISO() });
+
+    const haveItems = new Set((await dbAll('items')).map(i => i.id));
+    const haveImgs = new Set((await dbAll('images')).map(r => r.id));
+    const newItems = (m.items || [])
+      .filter(i => !haveItems.has(i.id)
+        && (isCardItem(i) || haveImgs.has(i.imageId)))
+      .map(i => { const c = { ...i }; if (!c.trashedAt) delete c.trashedAt; return c; });
+    if (newItems.length) await dbPutMany('items', newItems);
+
+    _srcIndex = null;
+    progClose();
+    const gotCards = newItems.filter(isCardItem).length;
+    toast(ok + ' 枚をこの端末に保存しました'
+      + (gotCards ? '<br>文字・色のカード ' + gotCards + ' つも増えました' : '')
+      + (newBoards.length ? '<br>ボード ' + newBoards.length + ' 個も増えました' : '')
+      + (ng ? '<br>' + ng + ' 枚は読めませんでした' : ''), 5000);
+    await refreshUsb(usbRoot._parent);
+    if (S.view === 'board') await openBoard(S.boardId); else renderHome();
+  } catch (e) {
+    progClose();
+    toast('取り込めませんでした<br>' + e.message);
+  }
+}
+
+/* ---------- この端末 → USB ---------- */
+async function pushToUSB() {
+  if (!usbRoot) return;
+  progOpen('USBに保存しています');
+  progCancelled = false;
+  try {
+    const imgDir = await usbRoot.getDirectoryHandle('images', { create: true });
+    const list = (usbDiff && usbDiff.push) || [];
+    let ok = 0;
+    for (let i = 0; i < list.length; i++) {
+      if (progCancelled) break;
+      progSet(i, list.length, (i + 1) + ' / ' + list.length + ' 枚');
+      const rec = list[i];
+      const ext = (rec.full.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+      const fh = await imgDir.getFileHandle(rec.id + '.' + ext, { create: true });
+      const w = await fh.createWritable();
+      await w.write(rec.full);
+      await w.close();
+      ok++;
+      if (i % 4 === 3) await new Promise(r => setTimeout(r, 0));
+    }
+
+    // 台帳とビューアを書き直す（USB側にしか無いものは消さずに残す）
+    progSet(1, 1, '台帳を書き直しています');
+    const { files } = await buildViewerPayload(() => { });
+    const keep = new Set(['index.html', 'viewer.css', 'viewer.js', 'data.js', 'manifest.json', 'README.txt']);
+    const merged = await mergeManifest(files);
+    for (const f of files) {
+      if (!keep.has(f.name)) continue;
+      const data = f.name === 'manifest.json' ? te.encode(JSON.stringify(merged, null, 1)) : f.data;
+      const fh = await usbRoot.getFileHandle(f.name, { create: true });
+      const w = await fh.createWritable();
+      await w.write(data);
+      await w.close();
+    }
+    progClose();
+    toast(ok + ' 枚をUSBに保存しました<br>他の端末でも、ここから取り込めます', 5000);
+    await refreshUsb(usbRoot._parent);
+  } catch (e) {
+    progClose();
+    toast('保存できませんでした<br>' + e.message);
+  }
+}
+
+/* 新しい台帳は「USBにあったもの」＋「手元にあるもの」の和。片方だけのものを消さない */
+async function mergeManifest(files) {
+  const fresh = JSON.parse(new TextDecoder().decode(
+    files.find(f => f.name === 'manifest.json').data));
+  const old = usbManifest;
+  if (!old) return fresh;
+  const byId = (arr) => new Map((arr || []).map(x => [x.id, x]));
+  const mergeList = (a, b) => {
+    const m = byId(a);
+    (b || []).forEach(x => { if (!m.has(x.id)) m.set(x.id, x); });
+    return [...m.values()];
+  };
+  return {
+    ...fresh,
+    boards: mergeList(fresh.boards, old.boards),
+    items: mergeList(fresh.items, old.items),
+    images: mergeList(fresh.images, old.images),
+  };
+}
+
+/* ---------- 配線 ---------- */
+$('#menu-usb-sync').onclick = async () => {
+  closeSheets();
+  usbRoot = null; usbManifest = null; usbDiff = null;
+  releaseUsbThumbs();
+  $('#usb-intro').hidden = false;
+  $('#usb-panel').hidden = true;
+  $('#usb-unsupported').hidden = fsOK();
+  $('#usb-pick').hidden = !fsOK();
+  const rec = await loadUsbHandle();
+  const has = !!(rec && rec.value) && fsOK();
+  $('#usb-reconnect').hidden = !has;
+  if (has) $('#usb-last').textContent = (rec.name || '') + '（' + (rec.at || '').slice(0, 10) + ' に接続）';
+  openSheet('#sheet-usb');
+};
+$('#usb-pick').onclick = pickUSB;
+$('#usb-reconnect').onclick = reconnectUSB;
+$('#usb-refresh').onclick = () => refreshUsb(usbRoot && usbRoot._parent);
+$('#usb-pull').onclick = pullFromUSB;
+$('#usb-push').onclick = pushToUSB;
+$('#usb-close').onclick = () => { releaseUsbThumbs(); closeSheets(); };
+
+/* ==========================================================================
+   切り抜き
+   元の画像は消さずに残し、切り抜いた結果を「別の写真」として作る。
+   こうすると、サムネ・色の抽出・USB同期・印刷など既存の仕組みがそのまま使える。
+   item.croppedFrom に元のIDを控えるので、いつでも元の形に戻せる。
+   ========================================================================== */
+const CROP = { rect: null, ratio: 'free', nat: { w: 0, h: 0 }, fit: null, item: null, g: null };
+
+function cropFitRect() {
+  // 画面に収まるように縮小表示された画像の、実際の位置と大きさ
+  const img = $('#crop-img'), stage = $('#crop-stage');
+  const sr = stage.getBoundingClientRect(), ir = img.getBoundingClientRect();
+  return { x: ir.left - sr.left, y: ir.top - sr.top, w: ir.width, h: ir.height };
+}
+
+function drawCropBox() {
+  const b = $('#crop-box'), r = CROP.rect, f = CROP.fit;
+  if (!r || !f) return;
+  b.style.left = (f.x + r.x * f.w) + 'px';
+  b.style.top = (f.y + r.y * f.h) + 'px';
+  b.style.width = (r.w * f.w) + 'px';
+  b.style.height = (r.h * f.h) + 'px';
+  // 外側だけ暗くする（選んだ中はそのまま見える）
+  $('#crop-shade').style.clipPath =
+    'polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0,' +
+    ' ' + (f.x + r.x * f.w) + 'px ' + (f.y + r.y * f.h) + 'px,' +
+    ' ' + (f.x + r.x * f.w) + 'px ' + (f.y + (r.y + r.h) * f.h) + 'px,' +
+    ' ' + (f.x + (r.x + r.w) * f.w) + 'px ' + (f.y + (r.y + r.h) * f.h) + 'px,' +
+    ' ' + (f.x + (r.x + r.w) * f.w) + 'px ' + (f.y + r.y * f.h) + 'px,' +
+    ' ' + (f.x + r.x * f.w) + 'px ' + (f.y + r.y * f.h) + 'px)';
+}
+
+/* 縦横比の指定があれば、それに合わせて高さを決め直す */
+function applyCropRatio() {
+  const r = CROP.rect, f = CROP.fit;
+  if (CROP.ratio === 'free' || !r || !f) return;
+  const target = parseFloat(CROP.ratio);            // 幅に対する高さの比（画面上の見た目で合わせる）
+  const pxW = r.w * f.w, pxH = pxW / target;
+  r.h = clamp(pxH / f.h, 0.05, 1);
+  if (r.y + r.h > 1) r.y = Math.max(0, 1 - r.h);
+}
+
+async function openCrop() {
+  const it = viewerItem;
+  if (!it || !it.imageId) return toast('写真を選んでから切り抜いてください');
+  const rec = S.imgs.get(it.imageId) || await dbGet('images', it.imageId);
+  if (!rec) return;
+  CROP.item = it;
+  CROP.ratio = 'free';
+  $$('#crop-ratios .ratio').forEach(b => b.classList.toggle('on', b.dataset.r === 'free'));
+
+  const img = $('#crop-img');
+  img.src = blobURL(rec.id, 'f', rec.full);
+  $('#crop').hidden = false;
+  await new Promise(r => { if (img.complete && img.naturalWidth) r(); else img.onload = r; });
+  CROP.nat = { w: img.naturalWidth, h: img.naturalHeight };
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  CROP.fit = cropFitRect();
+  // 最初は少し内側を選んだ状態にする（何をする画面か一目で分かる）
+  CROP.rect = { x: .08, y: .08, w: .84, h: .84 };
+  drawCropBox();
+}
+
+function closeCrop() { $('#crop').hidden = true; CROP.g = null; }
+
+/* 画面の向きや大きさが変わると、画像の表示位置も変わる。基準を取り直す */
+addEventListener('resize', () => {
+  if ($('#crop').hidden || !CROP.rect) return;
+  CROP.fit = cropFitRect();
+  drawCropBox();
+});
+
+/* 画面の上での1点を、画像のなかの比率（0〜1）に直す */
+function cropPoint(e) {
+  const f = CROP.fit, sr = $('#crop-stage').getBoundingClientRect();
+  return {
+    x: clamp((e.clientX - sr.left - f.x) / f.w, 0, 1),
+    y: clamp((e.clientY - sr.top - f.y) / f.h, 0, 1),
+  };
+}
+
+$('#crop-stage').addEventListener('pointerdown', (e) => {
+  if (!CROP.rect) return;
+  const stage = $('#crop-stage');
+  try { stage.setPointerCapture(e.pointerId); } catch (err) { }
+  const h = e.target.classList && e.target.classList.contains('ch') ? e.target.dataset.h : null;
+  const p = cropPoint(e);
+  const r = CROP.rect;
+  const inside = p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+  if (h) CROP.g = { mode: 'corner', h, r0: { ...r } };
+  else if (inside) CROP.g = { mode: 'move', p0: p, r0: { ...r } };
+  else CROP.g = { mode: 'draw', p0: p };           // 外から引くと、新しく四角を描く
+});
+
+$('#crop-stage').addEventListener('pointermove', (e) => {
+  if (!CROP.g || !CROP.rect) return;
+  const p = cropPoint(e), g = CROP.g, r = CROP.rect;
+  if (g.mode === 'draw') {
+    r.x = Math.min(g.p0.x, p.x); r.y = Math.min(g.p0.y, p.y);
+    r.w = Math.max(.05, Math.abs(p.x - g.p0.x)); r.h = Math.max(.05, Math.abs(p.y - g.p0.y));
+    applyCropRatio();
+  } else if (g.mode === 'move') {
+    r.x = clamp(g.r0.x + (p.x - g.p0.x), 0, 1 - g.r0.w);
+    r.y = clamp(g.r0.y + (p.y - g.p0.y), 0, 1 - g.r0.h);
+  } else if (g.mode === 'corner') {
+    const o = g.r0, right = o.x + o.w, bottom = o.y + o.h;
+    if (g.h === 'nw') { r.x = Math.min(p.x, right - .05); r.y = Math.min(p.y, bottom - .05); r.w = right - r.x; r.h = bottom - r.y; }
+    if (g.h === 'ne') { r.y = Math.min(p.y, bottom - .05); r.w = Math.max(.05, p.x - o.x); r.h = bottom - r.y; }
+    if (g.h === 'sw') { r.x = Math.min(p.x, right - .05); r.w = right - r.x; r.h = Math.max(.05, p.y - o.y); }
+    if (g.h === 'se') { r.w = Math.max(.05, p.x - o.x); r.h = Math.max(.05, p.y - o.y); }
+    r.w = Math.min(r.w, 1 - r.x); r.h = Math.min(r.h, 1 - r.y);
+    applyCropRatio();
+  }
+  drawCropBox();
+});
+
+const endCrop = () => { CROP.g = null; };
+$('#crop-stage').addEventListener('pointerup', endCrop);
+$('#crop-stage').addEventListener('pointercancel', endCrop);
+
+$$('#crop-ratios .ratio').forEach(b => b.onclick = () => {
+  CROP.ratio = b.dataset.r;
+  $$('#crop-ratios .ratio').forEach(x => x.classList.toggle('on', x === b));
+  applyCropRatio(); drawCropBox();
+});
+$('#crop-reset').onclick = () => { CROP.rect = { x: 0, y: 0, w: 1, h: 1 }; applyCropRatio(); drawCropBox(); };
+$('#crop-cancel').onclick = closeCrop;
+/* まわす（90度ずつ右へ）
+
+   切り抜きと同じで、回した姿を別の写真として焼き込む。
+   表示のときだけ傾けるやり方にすると、サムネ・色・USB・印刷・PDF・1枚画像の
+   ぜんぶに同じ補正を入れて回ることになるので、ここで作ってしまう方が壊れない。
+
+   it.rotFrom = 回す前の姿（原本）、it.rot = いまの角度。
+   一周して 0 に戻ったときは、新しく作らずに原本へ戻すだけにしてある。 */
+$('#viewer-rotate').onclick = async () => {
+  const it = viewerItem;
+  if (!it || !it.imageId) return;
+  const base = it.rotFrom || it.imageId;
+  const next = (((it.rot || 0) + 90) % 360);
+
+  // 一周した。作らずに原本へ戻す
+  if (next === 0) {
+    const orig = S.imgs.get(base) || await dbGet('images', base);
+    if (!orig) return toast('元の写真が見つかりませんでした');
+    pushHistory();
+    it.imageId = base;
+    delete it.rotFrom; delete it.rot;
+    it.h = Math.round(it.w * (orig.h / orig.w));
+    await dbPut('items', it);
+    S.imgs.set(orig.id, orig);
+    const el0 = itemEl(it.id);
+    if (el0) el0.replaceWith(makeItemEl(it));
+    updateItemEl(it);
+    touchBoard();
+    renderPalette();
+    await openViewer(it);
+    return toast('元の向きに戻りました');
+  }
+
+  // 前に作った同じ向きがあれば、作り直さずにそれを使う
+  // （写真を消さない方針なので、作りっぱなしにすると回すたびに増えてしまう）
+  const cache = it.rotIds || {};
+  if (cache[next]) {
+    const had = S.imgs.get(cache[next]) || await dbGet('images', cache[next]);
+    if (had) {
+      pushHistory();
+      it.rotFrom = base; it.rot = next; it.imageId = had.id;
+      it.h = Math.round(it.w * (had.h / had.w));
+      await dbPut('items', it);
+      S.imgs.set(had.id, had);
+      const elc = itemEl(it.id);
+      if (elc) elc.replaceWith(makeItemEl(it));
+      updateItemEl(it);
+      touchBoard();
+      renderPalette();
+      await openViewer(it);
+      return toast('まわしました（' + next + '度）');
+    }
+  }
+
+  const rec = S.imgs.get(base) || await dbGet('images', base);
+  if (!rec) return toast('写真が見つかりませんでした');
+  progOpen('まわしています');
+  try {
+    const dec = await decodeImage(rec.full);
+    const swap = (next % 180) !== 0;
+    const c = document.createElement('canvas');
+    c.width = swap ? dec.h : dec.w;
+    c.height = swap ? dec.w : dec.h;
+    const g = c.getContext('2d');
+    g.translate(c.width / 2, c.height / 2);
+    g.rotate(next * Math.PI / 180);
+    g.drawImage(dec.src, -dec.w / 2, -dec.h / 2);
+    dec.close();
+    const blob = await canvasToBlob(c, pickType(), FULL_Q);
+
+    const made = await storeImage(blob, rec.srcUrl || '');
+    pushHistory();
+    it.rotFrom = base;                                  // 回す前の姿は消さずに控えておく
+    it.rot = next;
+    cache[next] = made.id; it.rotIds = cache;           // 次に同じ向きへ回すとき用
+    it.imageId = made.id;
+    it.h = Math.round(it.w * (made.h / made.w));        // 縦横が入れ替わるので形を直す
+    await dbPut('items', it);
+    S.imgs.set(made.id, made);
+    const el = itemEl(it.id);
+    if (el) el.replaceWith(makeItemEl(it));
+    updateItemEl(it);
+    progClose();
+    touchBoard();
+    ensureColors(false).then(() => renderPalette());
+    await openViewer(it);
+    toast('まわしました（' + next + '度）<br>もう一度押すとさらに回ります');
+  } catch (e) {
+    progClose();
+    toast('まわせませんでした<br>' + e.message);
+  }
+};
+
+$('#viewer-crop').onclick = openCrop;
+
+$('#crop-ok').onclick = async () => {
+  const it = CROP.item, r = CROP.rect;
+  if (!it || !r) return;
+  const rec = S.imgs.get(it.imageId) || await dbGet('images', it.imageId);
+  if (!rec) return;
+  progOpen('切り抜いています');
+  try {
+    const dec = await decodeImage(rec.full);
+    const sx = Math.round(r.x * dec.w), sy = Math.round(r.y * dec.h);
+    const sw = Math.max(1, Math.round(r.w * dec.w)), sh = Math.max(1, Math.round(r.h * dec.h));
+    const c = document.createElement('canvas');
+    c.width = sw; c.height = sh;
+    c.getContext('2d').drawImage(dec.src, sx, sy, sw, sh, 0, 0, sw, sh);
+    dec.close();
+    const blob = await canvasToBlob(c, pickType(), FULL_Q);
+
+    // 元の写真は消さずに残す。切り抜きは別の写真として作る
+    const made = await storeImage(blob, rec.srcUrl || '');
+    pushHistory();
+    if (!it.croppedFrom) it.croppedFrom = it.imageId;   // 最初の切り抜きのときだけ元を控える
+    it.imageId = made.id;
+    delete it.rotFrom; delete it.rot; delete it.rotIds; // 切り抜いた姿が新しい原本になる
+    it.h = Math.round(it.w * (made.h / made.w));        // 新しい形に合わせて高さを直す
+    await dbPut('items', it);
+    S.imgs.set(made.id, made);
+    const el = itemEl(it.id);
+    if (el) { el.replaceWith(makeItemEl(it)); }
+    updateItemEl(it);
+    progClose();
+    closeCrop();
+    $('#viewer').hidden = true;
+    touchBoard();
+    ensureColors(false).then(() => renderPalette());
+    toast('切り抜きました<br>元の写真も残っています（1枚表示から「元の形に」）');
+  } catch (e) {
+    progClose();
+    toast('切り抜けませんでした<br>' + e.message);
+  }
+};
+
+/* 切り抜く前の写真に戻す（切り抜いた方も消さずに残しておく） */
+$('#viewer-uncrop').onclick = async () => {
+  const it = viewerItem;
+  if (!it || !it.croppedFrom) return;
+  const orig = await dbGet('images', it.croppedFrom);
+  if (!orig) return toast('元の写真が見つかりませんでした');
+  pushHistory();
+  it.imageId = it.croppedFrom;
+  delete it.croppedFrom;
+  delete it.rotFrom; delete it.rot; delete it.rotIds;
+  it.h = Math.round(it.w * (orig.h / orig.w));
+  await dbPut('items', it);
+  S.imgs.set(orig.id, orig);
+  const el = itemEl(it.id);
+  if (el) el.replaceWith(makeItemEl(it));
+  updateItemEl(it);
+  $('#viewer').hidden = true;
+  touchBoard();
+  renderPalette();
+  toast('元の形に戻しました');
+};
+
+
+/* 選んだ複数枚にまとめてタグ・区分けを付ける（これが一番の時短になる） */
+$('#btn-bulk-tag').onclick = () => {
+  const targets = S.picked.map(id => S.items.find(i => i.id === id)).filter(Boolean);
+  if (!targets.length) return;
+  openNoteSheet(targets);
+};
+
+/* ==========================================================================
+   区分けごとにまとめる
+   同じ区分けのものを横一列に集め、段ごとに見出しを置く。
+   これをやって初めて「区分け」が目に見えるものになる。
+   ========================================================================== */
+async function arrangeBySection() {
+  if (!S.items.length) return;
+  const gap = GAPS[SET.gap] !== undefined ? GAPS[SET.gap] : 20;
+  const colW = BASE_W;
+
+  // 区分けごとに分ける。区分け無しは最後にまとめる
+  const groups = new Map();
+  for (const it of S.items) {
+    const key = it.section || '';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  const names = [...groups.keys()].filter(n => n !== '').sort();
+  if (groups.has('')) names.push('');            // 区分け無しは末尾
+  if (names.length <= 1) {
+    toast('区分けがまだありません<br>写真を選んで「タグ」から付けられます', 4200);
+    return;
+  }
+
+  pushHistory();
+  const wrapEl = $('#canvas-wrap');
+  const perRow = Math.max(2, Math.floor(wrapEl.clientWidth / (colW + gap)) || 4);
+  const HEAD = 56;                                // 見出しのための余白
+  let y = 0;
+
+  for (const name of names) {
+    const list = groups.get(name);
+    let col = 0, rowTop = y, rowH = 0;
+    for (const it of list) {
+      const ratio = it.h / it.w;
+      it.w = colW; it.h = Math.round(colW * ratio);
+      it.x = col * (colW + gap);
+      it.y = rowTop;
+      rowH = Math.max(rowH, it.h);
+      updateItemEl(it);
+      col++;
+      if (col >= perRow) { col = 0; rowTop += rowH + gap; rowH = 0; }
+    }
+    y = rowTop + rowH + gap + HEAD;
+  }
+  await dbPutMany('items', S.items);
+  // 見出しを描く位置を控えておく（描画は renderSectionLabels が行う）
+  S.sectionLayout = names.map((name, i) => ({ name }));
+  touchBoard();
+  renderSectionLabels(groups, names, gap, HEAD);
+  fitAll();
+  revealItems();
+  toast(names.filter(n=>n).length + ' つの区分けにまとめました');
+}
+
+/* 段の上に区分けの名前を置く。盤面の一部として扱うので、写真と一緒に動く */
+function renderSectionLabels(groups, names, gap, HEAD) {
+  canvas.querySelectorAll('.sec-label').forEach(e => e.remove());
+  for (const name of names) {
+    const list = groups.get(name);
+    if (!list || !list.length) continue;
+    const top = Math.min(...list.map(i => i.y));
+    const left = Math.min(...list.map(i => i.x));
+    const el = document.createElement('div');
+    el.className = 'sec-label';
+    el.textContent = name || '区分けなし';
+    el.style.transform = 'translate(' + left + 'px,' + (top - HEAD + 12) + 'px)';
+    canvas.appendChild(el);
+  }
+}
+
+$('#arr-section').onclick = () => { closeSheets(); arrangeBySection(); };
+
+/* ==========================================================================
+   PDFにして送る
+   外部ライブラリを使わない方針なので、PDFを自前で組み立てる。
+   各ページは canvas で描いた絵を JPEG にして埋め込む（PDFはJPEGをそのまま入れられる）。
+   この作りなら日本語も確実に出る（PDFに日本語フォントを埋め込む必要がない）。
+   ========================================================================== */
+const PDF_DPI = 150;                       // 印刷に耐える程度。大きすぎるとファイルが重い
+const MM2PT = 72 / 25.4;
+
+function pdfEscape(str) {
+  return str.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+}
+
+/* ページ（JPEGのバイト列と実寸）の配列から、1つのPDFを組み立てる */
+function buildPDF(pages, title) {
+  const enc = new TextEncoder();
+  const chunks = [];
+  const offsets = [0];                     // オブジェクト番号 → バイト位置
+  let len = 0;
+  const put = (data) => {
+    const b = typeof data === 'string' ? enc.encode(data) : data;
+    chunks.push(b); len += b.length;
+  };
+  const obj = (num, body) => { offsets[num] = len; put(num + ' 0 obj\n'); put(body); put('\nendobj\n'); };
+
+  put('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+
+  // 1=カタログ 2=ページ一覧 3=情報。以降、ページごとに3つ（ページ/中身/画像）
+  const pageIds = pages.map((_, i) => 4 + i * 3);
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, '<< /Type /Pages /Count ' + pages.length + ' /Kids [' +
+         pageIds.map(id => id + ' 0 R').join(' ') + '] >>');
+  obj(3, '<< /Title (' + pdfEscape(title || 'MOOD BOARD') + ') /Producer (MOOD BOARD) >>');
+
+  pages.forEach((pg, i) => {
+    const pid = 4 + i * 3, cid = pid + 1, iid = pid + 2;
+    const W = pg.wPt, H = pg.hPt;
+    obj(pid, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + W.toFixed(2) + ' ' + H.toFixed(2) + ']' +
+             ' /Resources << /XObject << /Im0 ' + iid + ' 0 R >> >> /Contents ' + cid + ' 0 R >>');
+    // 画像をページいっぱいに置く
+    const stream = 'q\n' + W.toFixed(2) + ' 0 0 ' + H.toFixed(2) + ' 0 0 cm\n/Im0 Do\nQ\n';
+    obj(cid, '<< /Length ' + stream.length + ' >>\nstream\n' + stream + 'endstream');
+    offsets[iid] = len;
+    put(iid + ' 0 obj\n');
+    put('<< /Type /XObject /Subtype /Image /Width ' + pg.px + ' /Height ' + pg.py +
+        ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + pg.jpg.length + ' >>\nstream\n');
+    put(pg.jpg);
+    put('\nendstream\nendobj\n');
+  });
+
+  const xref = len;
+  const total = 4 + pages.length * 3;
+  let x = 'xref\n0 ' + total + '\n0000000000 65535 f \n';
+  for (let i = 1; i < total; i++) x += String(offsets[i] || 0).padStart(10, '0') + ' 00000 n \n';
+  put(x);
+  put('trailer\n<< /Size ' + total + ' /Root 1 0 R /Info 3 0 R >>\nstartxref\n' + xref + '\n%%EOF\n');
+
+  return new Blob(chunks, { type: 'application/pdf' });
+}
+
+/* 盤面を1枚の絵にして、その絵をA4に収めたPDFにする */
+async function exportBoardPDF(mode) {
+  const items = (PRINT.scope === 'picked' && S.picked.length)
+    ? S.picked.map(id => S.items.find(i => i.id === id)).filter(Boolean)
+    : S.items.filter(i => !i.trashedAt);
+  if (!items.length) return toast('PDFにするものがありません');
+
+  const P = PAPER[PRINT.paper] || PAPER.a4p;
+  const wPt = P.w * MM2PT, hPt = P.h * MM2PT;
+  const px = Math.round(P.w / 25.4 * PDF_DPI), py = Math.round(P.h / 25.4 * PDF_DPI);
+
+  progOpen('PDFを作っています');
+  try {
+    const pages = [];
+    const makePage = async (draw) => {
+      const c = document.createElement('canvas');
+      c.width = px; c.height = py;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff';            // 紙なので白地
+      ctx.fillRect(0, 0, px, py);
+      await draw(ctx, px, py);
+      const blob = await canvasToBlob(c, 'image/jpeg', 0.88);
+      pages.push({ jpg: new Uint8Array(await blob.arrayBuffer()), wPt, hPt, px, py });
+    };
+
+    const margin = Math.round(px * 0.06);
+    const title = S.board ? S.board.name : 'MOOD BOARD';
+
+    if (mode === 'one') {
+      // 1枚ずつ、大きく
+      for (let i = 0; i < items.length; i++) {
+        if (progCancelled) break;
+        progSet(i, items.length, (i + 1) + ' / ' + items.length + ' ページ');
+        const it = items[i];
+        await makePage(async (ctx, W, H) => {
+          await drawPdfHeader(ctx, W, margin, title, (i + 1) + ' / ' + items.length);
+          const top = margin + Math.round(px * 0.05);
+          const box = { x: margin, y: top, w: W - margin * 2, h: H - top - margin - Math.round(px * 0.06) };
+          await drawItemInto(ctx, it, box);
+          const cap = [it.note, (it.tags || []).join(' / ')].filter(Boolean).join('   ');
+          if (cap) {
+            ctx.fillStyle = '#444';
+            ctx.font = Math.round(px * 0.018) + 'px -apple-system,"Hiragino Sans",sans-serif';
+            ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+            ctx.fillText(cap, margin, H - margin);
+          }
+        });
+        await new Promise(r => setTimeout(r, 0));
+      }
+    } else {
+      // 盤面の配置のまま1ページに収める
+      progSet(0, 1, '組んでいます');
+      let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+      items.forEach(it => {
+        x1 = Math.min(x1, it.x); y1 = Math.min(y1, it.y);
+        x2 = Math.max(x2, it.x + it.w); y2 = Math.max(y2, it.y + it.h);
+      });
+      const bw = x2 - x1, bh = y2 - y1;
+      await makePage(async (ctx, W, H) => {
+        const headH = Math.round(px * 0.055);
+        await drawPdfHeader(ctx, W, margin, title, items.length + ' 枚');
+        const area = { x: margin, y: margin + headH, w: W - margin * 2, h: H - margin * 2 - headH };
+        const sc = Math.min(area.w / bw, area.h / bh);
+        const offX = area.x + (area.w - bw * sc) / 2;
+        const offY = area.y + (area.h - bh * sc) / 2;
+        const ordered = [...items].sort((a, b) => (a.z || 0) - (b.z || 0));
+        for (const it of ordered) {
+          await drawItemInto(ctx, it, {
+            x: offX + (it.x - x1) * sc, y: offY + (it.y - y1) * sc,
+            w: it.w * sc, h: it.h * sc,
+          }, true);
+        }
+      });
+    }
+
+    if (!pages.length) { progClose(); return; }
+    const pdf = buildPDF(pages, title);
+    progClose();
+    const name = (title || 'moodboard').replace(/[\/\\:*?"<>|]/g, '_') + '.pdf';
+    saveBlob(pdf, name);
+    toast('PDFにしました（' + pages.length + 'ページ・' + fmtBytes(pdf.size) + '）<br>そのまま送れます', 5000);
+  } catch (e) {
+    progClose();
+    toast('PDFにできませんでした<br>' + e.message, 4000);
+  }
+}
+
+/* 見出し（ボード名と枚数）。日本語も絵として描くので確実に出る */
+async function drawPdfHeader(ctx, W, margin, title, sub) {
+  ctx.fillStyle = '#111';
+  ctx.font = '600 ' + Math.round(W * 0.028) + 'px -apple-system,"Hiragino Sans",sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText(title, margin, margin * 0.6);
+  ctx.fillStyle = '#888';
+  ctx.font = Math.round(W * 0.016) + 'px -apple-system,"Hiragino Sans",sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(sub + '   ' + new Date().toLocaleDateString('ja-JP'), W - margin, margin * 0.75);
+  ctx.textAlign = 'left';
+  ctx.strokeStyle = '#ddd'; ctx.lineWidth = Math.max(1, W * 0.0012);
+  ctx.beginPath();
+  ctx.moveTo(margin, margin * 0.6 + W * 0.045);
+  ctx.lineTo(W - margin, margin * 0.6 + W * 0.045);
+  ctx.stroke();
+}
+
+/* 1つの要素（写真・文字カード・色見本）を、指定した枠に描く */
+async function drawItemInto(ctx, it, box, exact) {
+  if (it.type === 'text') {
+    ctx.fillStyle = '#f4ecd0';
+    ctx.fillRect(box.x, box.y, box.w, box.h);
+    ctx.fillStyle = '#2a241a';
+    const fs = Math.max(9, box.h * 0.1);
+    ctx.font = fs + 'px -apple-system,"Hiragino Sans",sans-serif';
+    ctx.textBaseline = 'top';
+    (it.text || '').split('\n').forEach((line, i) => {
+      ctx.fillText(line, box.x + box.w * 0.06, box.y + box.h * 0.08 + i * fs * 1.5, box.w * 0.88);
+    });
+    return;
+  }
+  if (it.type === 'color') {
+    ctx.fillStyle = it.color || '#888';
+    ctx.fillRect(box.x, box.y, box.w, box.h);
+    ctx.fillStyle = '#fff';
+    ctx.font = Math.max(8, box.h * 0.11) + 'px ui-monospace,Menlo,monospace';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText((it.color || '').toUpperCase(), box.x + box.w * 0.06, box.y + box.h * 0.92);
+    return;
+  }
+  const rec = S.imgs.get(it.imageId) || await dbGet('images', it.imageId);
+  if (!rec) return;
+  try {
+    const dec = await decodeImage(rec.full);
+    if (exact) {
+      ctx.drawImage(dec.src, box.x, box.y, box.w, box.h);
+    } else {
+      // 枠の中に収める（はみ出さない）
+      const sc = Math.min(box.w / dec.w, box.h / dec.h);
+      const w = dec.w * sc, h = dec.h * sc;
+      ctx.drawImage(dec.src, box.x + (box.w - w) / 2, box.y + (box.h - h) / 2, w, h);
+    }
+    dec.close();
+  } catch (e) { /* 読めない画像は飛ばす */ }
+}
+
+/* PDFの入口。印刷の設定（用紙・対象）をそのまま使う */
+$('#pdf-go').onclick = () => {
+  closeSheets();
+  exportBoardPDF(PRINT.mode === 'one' ? 'one' : 'board');
+};
+$('#menu-pdf').onclick = () => {
+  if (S.view !== 'board') { closeSheets(); return toast('先にボードを開いてください'); }
+  suggestPaper();
+  syncPrintChips();
+  $('#sheet-print').querySelector('h2').textContent = '印刷 / PDF';
+  openSheet('#sheet-print');
+};
