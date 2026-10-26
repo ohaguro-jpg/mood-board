@@ -787,11 +787,15 @@ document.addEventListener('keydown', (e) => {
     return clearPick();
   }
   const k = e.key.toLowerCase();
+  if (k === 'p' && !e.altKey) { e.preventDefault(); suggestPaper(); syncPc(); $('#printcfg').hidden = false; return; }
+  // ⌘F・⌘C・⌘A などはブラウザのもの（以前は ⌘F で全体表示、⌘A で並べ直しまで動いていた）
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  // 1枚表示・くらべる・印刷の設定の裏では、盤面を動かさない
+  if (!$('#solo').hidden || !$('#cmp').hidden || !$('#printcfg').hidden) return;
   if (k === 'f') fit();
   if (k === 'a') arrange();
   if (k === 's') arrangeColor();
   if (k === 'c' && V.picked.length >= 2) openCmp();
-  if (k === 'p') { e.preventDefault(); suggestPaper(); syncPc(); $('#printcfg').hidden = false; }
   if (e.key === 'Tab') {
     e.preventDefault();
     const i = D.boards.findIndex(b => b.id === V.boardId);

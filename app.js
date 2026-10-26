@@ -233,6 +233,10 @@ function toast(msg, ms = 2400) {
   toastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
+/* 日本語入力の「変換を確定する Enter」か。Safari（Mac版の中身）は確定の後に keyCode 229 の Enter を送ってくるので、
+   isComposing だけでは見分けられない（確定しただけで、名前やタグが決まってしまっていた） */
+const imeKey = (e) => e.isComposing || e.keyCode === 229;
+
 /* テキスト入力（ネイティブprompt はPWAで出ないことがあるので自前） */
 function ask(title, initial = '', multiline = false) {
   return new Promise((res) => {
@@ -246,12 +250,17 @@ function ask(title, initial = '', multiline = false) {
     const done = (val) => {
       wrap.hidden = true;
       $('#prompt-ok').onclick = null; $('#prompt-cancel').onclick = null;
-      inp.onkeydown = null;
+      inp.onkeydown = null; area.onkeydown = null;
       res(val);
     };
     $('#prompt-ok').onclick = () => done(field.value.trim());
     $('#prompt-cancel').onclick = () => done(null);
-    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); done(field.value.trim()); } };
+    inp.onkeydown = (e) => {
+      if (imeKey(e)) return;
+      if (e.key === 'Enter') { e.preventDefault(); done(field.value.trim()); }
+      else if (e.key === 'Escape') { e.preventDefault(); done(null); }
+    };
+    area.onkeydown = (e) => { if (e.key === 'Escape' && !imeKey(e)) { e.preventDefault(); done(null); } };
   });
 }
 
@@ -731,6 +740,9 @@ async function openBoard(id) {
   S.view = 'board';
   S.sel = null; S.picking = false; S.picked = [];
   S.filter = { q: '', hue: null };
+  // 前のボードの「描く」・右のパネル・選ぶドックを片付ける（⌥⌘→ などで直接移ると、前のボードの中身が残っていた）
+  quitDrawing();
+  setDock('board');
   clearHistory();   // 履歴はボードごと。別のボードには持ち込まない
   $('#view-home').hidden = true;
   $('#view-board').hidden = false;
@@ -778,6 +790,7 @@ function goHome() {
   const pb = $('#palette'); if (pb) pb.hidden = true;
   $('#zoom-readout').hidden = false;
   $('#btn-view').hidden = true;
+  quitDrawing();
   setDock('board');
   renderHome();
 }
@@ -2068,12 +2081,15 @@ async function importUrls(text) {
     text.split(/[\s,]+/).map(s => s.trim()).filter(s => /^https?:\/\//i.test(s))
   )];
   if (!urls.length) return toast('URLが見つかりませんでした');
+  // ボードを開いていないとき（ストックで貼り付けた）は、どのボードにも載せずストックへ
+  // （以前はボードの無い写真の置き場所が作られ、行き場のない記録が残っていた）
+  const toStock = S.view !== 'board' || !S.boardId;
 
-  pushHistory();
+  if (!toStock) pushHistory();
   progOpen('取り込んでいます');
   let ok = 0, dup = 0, ng = 0;
   const failed = [];
-  const place = beginPlacement(urls.length);
+  const place = toStock ? null : beginPlacement(urls.length);
 
   for (let i = 0; i < urls.length; i++) {
     if (progCancelled) break;
@@ -2083,7 +2099,7 @@ async function importUrls(text) {
     try {
       const hit = await findBySrc(url);
       if (hit) {
-        if (!S.items.some(it => it.imageId === hit.id)) {
+        if (!toStock && !S.items.some(it => it.imageId === hit.id)) {
           await addImageToBoard(hit, placeNext(place, hit.h / hit.w));
         }
         dup++;
@@ -2094,7 +2110,7 @@ async function importUrls(text) {
       const blob = await res.blob();
       if (!blob.type.startsWith('image/') && blob.size < 200) throw new Error('画像ではない');
       const rec = await storeImage(blob, url);
-      await addImageToBoard(rec, placeNext(place, rec.h / rec.w));
+      if (!toStock) await addImageToBoard(rec, placeNext(place, rec.h / rec.w));
       ok++;
     } catch (e) {
       ng++;
@@ -2103,9 +2119,13 @@ async function importUrls(text) {
     if (i % 3 === 2) await new Promise(r => setTimeout(r, 0));
   }
   progClose();
-  await touchBoard();
-  $('#board-empty').hidden = S.items.length > 0;
-  if (S.mode === 'grid') renderGrid(); else fitAll();
+  if (toStock) {
+    if (S.view === 'home') { if (!STOCK.on) showStock(true); else await loadStock(); }
+  } else {
+    await touchBoard();
+    $('#board-empty').hidden = S.items.length > 0;
+    if (S.mode === 'grid') renderGrid(); else fitAll();
+  }
 
   let msg = ok + ' 枚を保存しました';
   if (dup) msg += '<br>' + dup + ' 枚は取り込み済みでした';
@@ -2354,7 +2374,20 @@ async function importZip(file) {
       if (it.imageId) {
         const iid = imgMap.get(it.imageId);
         if (!iid) continue;
-        newItems.push({ ...it, id: uid(), boardId: bid, imageId: iid });
+        const ni = { ...it, id: uid(), boardId: bid, imageId: iid };
+        // 切り抜き・回転の「元の写真」への印も、新しい番号に付け替える
+        // （以前は古い番号のままで、別の端末で読み込むと「元の形に」「まわす」が効かなかった）
+        for (const k of ['croppedFrom', 'rotFrom']) {
+          if (!ni[k]) continue;
+          if (imgMap.has(ni[k])) ni[k] = imgMap.get(ni[k]); else delete ni[k];
+        }
+        if (ni.rotIds) {
+          const r = {};
+          for (const [deg, oid] of Object.entries(ni.rotIds)) if (imgMap.has(oid)) r[deg] = imgMap.get(oid);
+          if (Object.keys(r).length) ni.rotIds = r; else delete ni.rotIds;
+        }
+        if (!ni.rotFrom) { delete ni.rot; }
+        newItems.push(ni);
       } else if (isCardItem(it)) {
         newItems.push({ ...it, id: uid(), boardId: bid });
       }
@@ -2701,7 +2734,7 @@ function addTypedTag() {
 }
 $('#tag-add-btn').onclick = addTypedTag;
 $('#note-tags').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); addTypedTag(); }
+  if (e.key === 'Enter' && !imeKey(e)) { e.preventDefault(); addTypedTag(); }
 });
 
 /* 1枚でも、選んだ複数枚でも開ける */
@@ -2945,6 +2978,18 @@ $('#menu-delete-board').onclick = async () => {
 /* --- キーボード（PC） --- */
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  // 確かめる窓（はい／いいえ）が出ている間：Esc で「やめる」。ほかのキーで後ろを動かさない
+  // （以前は Esc で後ろの画面だけ戻り、窓が残っていた）
+  if (!$('#prompt').hidden) { if (e.key === 'Escape') { e.preventDefault(); $('#prompt-cancel').click(); } return; }
+  // 取り込み・書き出しの途中：Esc は「やめる」。ほかのキーは効かせない
+  // （途中で Esc でボード一覧へ戻ると、残りの写真がどのボードにも入らず宙に浮いていた）
+  if (!$('#progress').hidden) { if (e.key === 'Escape') progCancelled = true; return; }
+  // 切り抜き中：Esc で切り抜きだけやめる、⏎ で切り抜く（以前は Esc で後ろの1枚表示が閉じ、切り抜きだけ残っていた）
+  if (!$('#crop').hidden) {
+    if (e.key === 'Escape') closeCrop();
+    else if (e.key === 'Enter') { e.preventDefault(); $('#crop-ok').click(); }
+    return;
+  }
   // プレゼン中：左右でめくる、Esc で終わる
   if (PR) {
     if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); return stepSlide(1); }
@@ -2952,6 +2997,8 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') return stopPresent();
     return;
   }
+  // Esc は上に重なっているものから閉じる（シート → 1枚表示 → みくらべ）
+  if (e.key === 'Escape' && !$('#scrim').hidden) return closeSheets();
   // 描いている間：Esc で終わる
   if (DRAW.on && e.key === 'Escape') return stopDraw();
   // 1枚表示のスポイトとガイドは Esc で先に外す
@@ -2959,11 +3006,13 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!$('#viewer').hidden) { $('#viewer').hidden = true; stopViewerVideo(); return void resetViewerTools(); }
     if (!$('#compare').hidden) return closeCompare();
-    if (!$('#scrim').hidden) return closeSheets();
     if (S.picking) return stopPicking();
     if (S.sel) return selectItem(null);
     if (S.view === 'board') return goHome();
   }
+  // 1枚表示・みくらべ・シートを開いている間は、後ろの盤面やストックをキーで動かさない
+  // （見えないところで写真が動いたり、はずれたり、ボードが替わったりしていた）。説明書・設定などの共通キーだけ効かせる
+  if (!$('#viewer').hidden || !$('#compare').hidden || !$('#scrim').hidden) return void runKeymap(e, 'any');
   if (S.view === 'home' && STOCK.on && stockKey(e)) return;
   if (runKeymap(e, 'any')) return;
   if (S.view !== 'board') return;
@@ -5089,7 +5138,7 @@ $('#viewer-rotate').onclick = async () => {
     dec.close();
     const blob = await canvasToBlob(c, pickType(), FULL_Q);
 
-    const made = await storeImage(blob, rec.srcUrl || '');
+    const made = await storeImage(blob, rec.srcUrl || '', { derived: true });   // 切り抜き・まわすで途中にできた写真
     pushHistory();
     it.rotFrom = base;                                  // 回す前の姿は消さずに控えておく
     it.rot = next;
@@ -5131,7 +5180,7 @@ $('#crop-ok').onclick = async () => {
     const blob = await canvasToBlob(c, pickType(), FULL_Q);
 
     // 元の写真は消さずに残す。切り抜きは別の写真として作る
-    const made = await storeImage(blob, rec.srcUrl || '');
+    const made = await storeImage(blob, rec.srcUrl || '', { derived: true });   // 切り抜き・まわすで途中にできた写真
     pushHistory();
     if (!it.croppedFrom) it.croppedFrom = it.imageId;   // 最初の切り抜きのときだけ元を控える
     it.imageId = made.id;
@@ -5567,10 +5616,15 @@ async function runTool(tool) {
     case 'lock': closeSheets(); return toggleLock(t);
     case 'front': case 'back': closeSheets(); return reorder(t, tool);
     case 'tail': closeSheets(); return cycleTail(t);
-    case 'crop': closeSheets(); await openViewer(photos[0]); return $('#viewer-crop').click();
-    case 'eyedrop': closeSheets(); await openViewer(photos[0]); return setEyedrop(true);
-    case 'guide': closeSheets(); await openViewer(photos[0]); return cycleGuide();
-    case 'info': closeSheets(); await openViewer(photos[0]); return toggleInfo(true);
+    case 'crop': case 'eyedrop': case 'guide': case 'info': {
+      // 写真用の道具（1枚表示でも、動画のときは出していない）。選んだ中の最初の「写真」にかける
+      const still = photos.find(it => !isVideoRec(S.imgs.get(it.imageId)));
+      if (!still) return toast('動画には使えません。写真を選んでください');
+      closeSheets(); await openViewer(still);
+      if (tool === 'crop') return $('#viewer-crop').click();
+      if (tool === 'eyedrop') return setEyedrop(true);
+      return tool === 'guide' ? cycleGuide() : toggleInfo(true);
+    }
     case 'harmony': return openHarmony(t);
     case 'gray': closeSheets(); return setView('gray', !VIEW.gray);
     case 'mirror': closeSheets(); return setView('mirror', !VIEW.mirror);
@@ -5745,10 +5799,15 @@ function startDraw(tool) {
   toast('なぞると描けます。shift を押すとまっすぐ／正円に。終わったら「おわる」', 3200);
 }
 function stopDraw() {
+  quitDrawing();
+  setDock(S.picking ? 'select' : 'board');
+}
+/* 描くのをやめるだけ（ドックは呼んだ側で戻す）。ボードを移るときにも使う */
+function quitDrawing() {
+  if (typeof DRAW === 'undefined' || !DRAW.on) return;
   DRAW.on = false;
   drawLiveEnd();
   $('#canvas-wrap').classList.remove('drawing');
-  setDock(S.picking ? 'select' : 'board');
 }
 $$('#draw-dock .dtool').forEach(b => b.onclick = () => { DRAW.shape = b.dataset.shape; syncDrawDock(); });
 $$('#draw-dock .dcol').forEach(b => b.onclick = () => { DRAW.color = b.dataset.c; DRAW.colorChosen = true; syncDrawDock(); });
@@ -6314,16 +6373,23 @@ function parseExifTiff(dv, start) {
    どのサイトでも「画像をコピー」→ ここで ⌘V で1枚ずつ入れられる（自分で保存するのと同じ）。
    まとめて自動で集めることを禁じているサイト（Instagram・models.com）向けの、正しい入れ方。 */
 document.addEventListener('paste', async (e) => {
-  if (S.view !== 'board' && !(S.view === 'home' && STOCK.on)) return;
+  if (S.view !== 'board' && S.view !== 'home') return;
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
   if (!$('#prompt').hidden) return;
+  if (!$('#progress').hidden || !$('#crop').hidden) return;   // 取り込み・切り抜きの途中は受け付けない
   const cd = e.clipboardData;
   if (!cd) return;
   const files = Array.from(cd.files || []).filter(f => f.type.startsWith('image/') || isVideoFile(f));
-  if (files.length) { e.preventDefault(); return S.view === 'board' ? importFiles(files, { atCenter: true }) : importToStock(files); }
   const text = cd.getData('text/plain') || '';
-  if (/https?:\/\/\S+/.test(text)) { e.preventDefault(); return importUrls(text); }
+  const isUrl = /https?:\/\/\S+/.test(text);
+  if (!files.length && !isUrl) return;
+  e.preventDefault();
+  closeSheets(); closeOverlays();   // 入ったものが見えるように、上に重なっているものは閉じる（1枚表示の裏に入っていた）
+  // ボード一覧で貼ったときもストックへ入れる（以前は「ストック」を開いているときしか受け付けず、黙って何も起きなかった）
+  if (S.view === 'home' && !STOCK.on) showStock(true);
+  if (files.length) return S.view === 'board' ? importFiles(files, { atCenter: true }) : importToStock(files);
+  return importUrls(text);
 });
 
 /* ========================== Mac版のつなぎ ================================ */
@@ -6552,7 +6618,7 @@ function inspTagBlocks(body, list, withRefs) {
   add.addEventListener('focus', () => { INSP.typing = true; });
   add.addEventListener('blur', () => { INSP.typing = false; });
   add.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || e.isComposing) return;
+    if (e.key !== 'Enter' || imeKey(e)) return;
     e.preventDefault();
     const tags = add.value.split(/[,、\s]+/).map(x => x.trim()).filter(Boolean);
     if (!tags.length) return;
@@ -6756,10 +6822,19 @@ window.mbMenu = (id) => {
   const k = KEYMAP.find(x => x.id === id);
   if (!k || !k.run) return;
   if (lastKeyRun.id === id && Date.now() - lastKeyRun.t < 400) return;
+  if (!$('#progress').hidden) return toast('いまの作業が終わってからにしてください');
   if (k.where === 'board' && S.view !== 'board') return toast('先にボードを開いてください');
   closeSheets();
+  // 説明書・設定などはシートで上に開くのでそのまま。それ以外は、1枚表示・みくらべ・切り抜き・プレゼンの後ろで動かないよう先に閉じる
+  if (!['help', 'keys', 'settings'].includes(id)) closeOverlays();
   k.run();
 };
+function closeOverlays() {
+  if (!$('#crop').hidden) closeCrop();
+  if (PR) stopPresent();
+  if (!$('#viewer').hidden) { $('#viewer').hidden = true; stopViewerVideo(); resetViewerTools(); }
+  if (!$('#compare').hidden) closeCompare();
+}
 
 function zoomCenter(f, absolute) {
   const w = $('#canvas-wrap');
@@ -6889,6 +6964,7 @@ async function loadStock() {
     const r = refs.get(rec.id);
     if (r && r.active.length) return true;
     if (r && r.trashed) return false;            // ボードのゴミ箱に入っているだけ
+    if (rec.derived) return false;               // 切り抜き・まわすの途中でできて、いまは使っていない写真
     return !sources.has(rec.id);                 // 切り抜き・回転の元の姿は出さない
   }).sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
   STOCK.info = new Map();
@@ -7468,7 +7544,7 @@ async function sendToCloud(where) {
 /* 設定が「自動で」なら、取り込んだ写真をすぐクラウドにも入れる（まとめて1回に） */
 const CLOUD_Q = { photos: [], folder: [], t: 0 };
 function cloudAuto(rec) {
-  if (!NATIVE || !rec) return;
+  if (!NATIVE || !rec || rec.derived) return;      // 切り抜き・まわすでできた写真は送らない（まわすたびに増えてしまう）
   if (SET.autoPhotos !== 'on' && SET.autoFolder !== 'on') return;
   CLOUD_Q.pending = CLOUD_Q.pending || [];
   CLOUD_Q.pending.push(rec.id);
