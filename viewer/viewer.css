@@ -216,3 +216,31 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
   font-family:var(--mono);font-size:11px;letter-spacing:.06em;
   color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.55));
 }
+
+/* ---- アプリで足した見た目（傾き・補正・描いた線・チェックリスト・吹き出し）2026-10-22 ---- */
+.ph{transform-origin:50% 50%}
+.ph > *:not(.no){opacity:var(--op,1)}
+.ph.has-warm{isolation:isolate}
+.ph .warm{position:absolute;inset:0;mix-blend-mode:soft-light;pointer-events:none}
+.ph .refs{position:absolute;top:6px;left:6px;max-width:calc(100% - 12px);padding:3px 8px;border-radius:999px;
+  background:rgba(17,17,20,.72);color:#fff;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph.ph-draw{background:transparent;box-shadow:none}
+.ph.ph-draw svg{display:block;width:100%;height:100%;overflow:visible}
+.ph.ph-list{background:#fff}
+.ph-list-body{position:absolute;inset:0;padding:12px 14px;overflow:hidden;color:#18181b;font-size:13px;line-height:1.5}
+.ph-list-body .lt-title{font-weight:700;margin-bottom:6px}
+.ph-list-body .lt-row{padding:3px 0;border-top:1px solid rgba(0,0,0,.06)}
+.ph-list-body .lt-row.done{color:#9a9aa0;text-decoration:line-through}
+.ph-list-body .lt-row.must{font-weight:700}
+.ph.ph-text.bubble{background:#fff;border-radius:18px;overflow:visible}
+.ph.ph-text.bubble .ph-text-body{color:#18181b}
+.ph.ph-text.bubble::after{content:"";position:absolute;width:20px;height:20px;background:#fff;bottom:-8px;left:22px;transform:rotate(45deg)}
+.ph.ph-text.bubble.tail-br::after{left:auto;right:22px}
+.ph.ph-text.bubble.tail-tl::after{bottom:auto;top:-8px}
+.ph.ph-text.bubble.tail-tr::after{bottom:auto;top:-8px;left:auto;right:22px}
+/* 付箋の色：吹き出しのしっぽも同じ色に */
+.ph-text.bubble[style*="--card-bg"]::before{background:var(--card-bg)}
+/* 動画：表紙に ▶ と長さ。1枚表示では動画を再生 */
+.ph .vbadge{position:absolute;left:8px;bottom:8px;padding:3px 8px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:600;pointer-events:none}
+#solo-video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+

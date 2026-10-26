@@ -56,6 +56,47 @@ function render() {
   for (const it of V.items) plane.appendChild(makeEl(it));
 }
 
+/* ---- アプリ本体と同じ見た目にするための部品（app.js の同名の処理と同じ式） ---- */
+const tf = (it) => 'translate(' + it.x + 'px,' + it.y + 'px)' + (it.tilt ? ' rotate(' + it.tilt + 'deg)' : '');
+function photoFilter(it) {
+  const a = it.adj || {}, f = [];
+  if (a.bri) f.push('brightness(' + (1 + a.bri / 100) + ')');
+  if (a.con) f.push('contrast(' + (1 + a.con / 100) + ')');
+  if (a.sat) f.push('saturate(' + Math.max(0, 1 + a.sat / 100) + ')');
+  return f.join(' ');
+}
+function warmColor(w) {
+  if (!w) return '';
+  const a = Math.min(1, Math.abs(w) / 100) * 0.45;
+  return w > 0 ? 'rgba(255,136,24,' + a + ')' : 'rgba(36,118,255,' + a + ')';
+}
+function drawPathD(it) {
+  const p = it.pts || [], f = (n) => Math.round(n * 10) / 10;
+  const sw = it.sw || 4, vw = it.vw || it.w, vh = it.vh || it.h, m = sw / 2;
+  if (it.shape === 'rect') return 'M' + f(m) + ' ' + f(m) + 'H' + f(vw - m) + 'V' + f(vh - m) + 'H' + f(m) + 'Z';
+  if (it.shape === 'ellipse') {
+    const rx = Math.max(1, vw / 2 - m), ry = Math.max(1, vh / 2 - m), cx = vw / 2, cy = vh / 2;
+    return 'M' + f(cx - rx) + ' ' + f(cy) + 'A' + f(rx) + ' ' + f(ry) + ' 0 1 0 ' + f(cx + rx) + ' ' + f(cy) +
+           'A' + f(rx) + ' ' + f(ry) + ' 0 1 0 ' + f(cx - rx) + ' ' + f(cy) + 'Z';
+  }
+  if (!p.length) return '';
+  if (it.shape === 'line' || it.shape === 'arrow') {
+    const a = p[0], b = p[p.length - 1];
+    let d = 'M' + f(a[0]) + ' ' + f(a[1]) + 'L' + f(b[0]) + ' ' + f(b[1]);
+    if (it.shape === 'arrow') {
+      const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), L = Math.max(10, sw * 3.6), sp = 0.5;
+      d += 'M' + f(b[0] - L * Math.cos(ang - sp)) + ' ' + f(b[1] - L * Math.sin(ang - sp)) + 'L' + f(b[0]) + ' ' + f(b[1]) +
+           'L' + f(b[0] - L * Math.cos(ang + sp)) + ' ' + f(b[1] - L * Math.sin(ang + sp));
+    }
+    return d;
+  }
+  if (p.length < 3) return 'M' + p.map(q => f(q[0]) + ' ' + f(q[1])).join('L');
+  let d = 'M' + f(p[0][0]) + ' ' + f(p[0][1]);
+  for (let i = 1; i < p.length - 1; i++) d += 'Q' + f(p[i][0]) + ' ' + f(p[i][1]) + ' ' + f((p[i][0] + p[i + 1][0]) / 2) + ' ' + f((p[i][1] + p[i + 1][1]) / 2);
+  const z = p[p.length - 1];
+  return d + 'L' + f(z[0]) + ' ' + f(z[1]);
+}
+
 function makeEl(it) {
   const img = D.images[it.imageId];
   const el = document.createElement('div');
@@ -63,14 +104,44 @@ function makeEl(it) {
   el.dataset.id = it.id;
   el.style.width = it.w + 'px';
   el.style.height = it.h + 'px';
-  el.style.transform = 'translate(' + it.x + 'px,' + it.y + 'px)';
+  el.style.transform = tf(it);
 
+  if (it.opacity != null && it.opacity < 1) el.style.setProperty('--op', it.opacity);
+  if (it.type === 'draw') {
+    el.classList.add('ph-draw');
+    el.innerHTML = '<svg viewBox="0 0 ' + (it.vw || it.w) + ' ' + (it.vh || it.h) + '" preserveAspectRatio="none">' +
+      '<path d="' + drawPathD(it) + '" fill="none" stroke="' + (it.stroke || '#111114') + '" stroke-width="' + (it.sw || 4) +
+      '" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return el;
+  }
+  if (it.type === 'list') {
+    el.classList.add('ph-list');
+    const box = document.createElement('div'); box.className = 'ph-list-body';
+    if (it.title) { const h = document.createElement('div'); h.className = 'lt-title'; h.textContent = it.title; box.appendChild(h); }
+    (it.rows || []).forEach(r => {
+      const row = document.createElement('div');
+      row.className = 'lt-row' + (r.done ? ' done' : '') + (r.must ? ' must' : '');
+      row.textContent = (r.done ? '☑ ' : '☐ ') + (r.must ? '★ ' : '') + (r.t || '');
+      box.appendChild(row);
+    });
+    el.appendChild(box);
+    return el;
+  }
   // 写真のない種別。文字カードと色見本も盤面に並ぶ
   if (it.type === 'text') {
     el.classList.add('ph-text');
+    if (it.style === 'bubble') el.classList.add('bubble', 'tail-' + (it.tail || 'bl'));
     const t = document.createElement('div');
     t.className = 'ph-text-body';
     t.textContent = it.text || '';
+    // 付箋の色（本体の it.bg）。文字は色の明るさで黒か白に
+    if (it.bg) {
+      const n = parseInt(String(it.bg).replace('#', ''), 16) || 0;
+      const lum = (((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114) / 255;
+      el.style.setProperty('--card-bg', it.bg);
+      el.style.background = it.bg;
+      t.style.color = lum > 0.62 ? '#1f1d18' : '#f4f4f5';
+    }
     el.appendChild(t);
     return el;
   }
@@ -89,7 +160,18 @@ function makeEl(it) {
   im.src = img ? img.file : '';
   im.alt = it.note || '';
   im.draggable = false;
+  const flt = photoFilter(it);
+  if (flt) im.style.filter = flt;
+  if (it.flipX || it.flipY) im.style.transform = 'scale(' + (it.flipX ? -1 : 1) + ',' + (it.flipY ? -1 : 1) + ')';
   el.appendChild(im);
+  const wc = it.adj ? warmColor(it.adj.warm) : '';
+  if (wc) { const w = document.createElement('div'); w.className = 'warm'; w.style.background = wc; el.appendChild(w); el.classList.add('has-warm'); }
+  if (it.refs && it.refs.length) { const rb = document.createElement('div'); rb.className = 'refs'; rb.textContent = it.refs.join('・'); el.appendChild(rb); }
+  if (img && img.video) {             // 動画は表紙に ▶ と長さ
+    const t = Math.round(img.dur || 0), vb = document.createElement('div');
+    vb.className = 'vbadge'; vb.textContent = '▶ ' + Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+    el.appendChild(vb);
+  }
   const fr = document.createElement('div');
   fr.className = 'frame';
   el.appendChild(fr);
@@ -174,7 +256,7 @@ function arrange() {
     const el = elOf(it.id);
     if (el) {
       el.style.width = it.w + 'px'; el.style.height = it.h + 'px';
-      el.style.transform = 'translate(' + it.x + 'px,' + it.y + 'px)';
+      el.style.transform = tf(it);
     }
   }
   fit();
@@ -212,7 +294,7 @@ function arrangeColor() {
     const el = elOf(it.id);
     if (el) {
       el.style.width = it.w + 'px'; el.style.height = it.h + 'px';
-      el.style.transform = 'translate(' + it.x + 'px,' + it.y + 'px)';
+      el.style.transform = tf(it);
     }
   });
   fit();
@@ -465,6 +547,16 @@ function openSolo(id) {
   if (!it) return;
   const img = D.images[it.imageId];
   $('#solo-img').src = img ? img.file : '';
+  // 動画は、表紙の代わりに動画そのものを再生する
+  let v = $('#solo-video');
+  if (img && img.video) {
+    if (!v) { v = document.createElement('video'); v.id = 'solo-video'; v.controls = true; v.playsInline = true; $('#solo-img').after(v); }
+    v.hidden = false; $('#solo-img').hidden = true;
+    v.poster = img.file; v.src = img.video; v.play().catch(() => { });
+  } else {
+    if (v) { v.pause(); v.removeAttribute('src'); v.load(); v.hidden = true; }
+    $('#solo-img').hidden = false;
+  }
   const bits = [];
   if (img) bits.push(img.w + ' × ' + img.h);
   if (it.note) bits.push(it.note);
@@ -645,8 +737,13 @@ $('#cmp-close').onclick = closeCmp;
 $('#cmp-fill').onclick = () => { V.cmpFill = !V.cmpFill; openCmp(); };
 $('#cmp-print').onclick = () => { V.print.scope = 'picked'; suggestPaper(); syncPc(); $('#printcfg').hidden = false; };
 $$('#cmp-bar .lay').forEach(b => b.onclick = () => { V.cmpLayout = b.dataset.lay; openCmp(); });
-$('#solo-close').onclick = () => { $('#solo').hidden = true; };
-$('#solo').onclick = (e) => { if (e.target.id === 'solo') $('#solo').hidden = true; };
+function closeSolo() {
+  $('#solo').hidden = true;
+  const v = $('#solo-video');
+  if (v) { v.pause(); v.removeAttribute('src'); v.load(); }
+}
+$('#solo-close').onclick = closeSolo;
+$('#solo').onclick = (e) => { if (e.target.id === 'solo') closeSolo(); };
 
 /* ボードが横長なら A4よこ を先に出す */
 let paperTouched = false;
@@ -684,7 +781,7 @@ $('#pc-go').onclick = () => { $('#printcfg').hidden = true; doPrint(); };
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (!$('#solo').hidden) return void ($('#solo').hidden = true);
+    if (!$('#solo').hidden) return void closeSolo();
     if (!$('#printcfg').hidden) return void ($('#printcfg').hidden = true);
     if (!$('#cmp').hidden) return closeCmp();
     return clearPick();

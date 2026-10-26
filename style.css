@@ -119,28 +119,42 @@ body.calm #canvas.smooth{transition:none}
 #canvas{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;will-change:transform}
 #canvas.smooth{transition:transform .5s cubic-bezier(.16,1,.3,1)}
 
-/* 立ち上がり：中心から外へ、少し遅れて像を結ぶ */
+/* 立ち上がり：中心から外へ、少し遅れて像を結ぶ。
+   ※ ぼかし(filter:blur)は使わない。全写真で同時に動かすとSafariでひどく重くなる。
+     透明度と大きさ（合成だけで済むもの）に限る */
 @keyframes mb-in{
   from{opacity:0}
   to{opacity:1}
 }
 @keyframes mb-in-img{
-  from{opacity:0;transform:scale(.88) translateY(10px);filter:blur(7px)}
-  to{opacity:1;transform:none;filter:blur(0)}
+  from{opacity:0;transform:scale(.94)}
+  to{opacity:1;transform:none}
 }
-.item.in{animation:mb-in .5s ease backwards;animation-delay:var(--dl,0ms)}
-.item.in>img,.item.in>.broken{animation:mb-in-img .72s cubic-bezier(.16,1,.3,1) backwards;animation-delay:var(--dl,0ms)}
+/* 枚数が多いボードは、1枚ずつではなく盤面ごと出す（#canvas は位置合わせに transform を
+   使っているので、ここは透明度だけ） */
+@keyframes mb-canvas-in{from{opacity:0}to{opacity:1}}
+#canvas.reveal{animation:mb-canvas-in .4s ease}
+.item.in{animation:mb-in .42s ease backwards;animation-delay:var(--dl,0ms)}
+.item.in>img,.item.in>.broken{animation:mb-in-img .55s cubic-bezier(.2,.8,.2,1) backwards;animation-delay:var(--dl,0ms)}
 @media (prefers-reduced-motion:reduce){
   .item.in,.item.in>img{animation:none}
   #canvas.smooth{transition:none}
 }
+/* ※ 写真の位置は transform で決めている。ここに transform の transition を常時つけると、
+     ドラッグ中に位置を書き換えるたび0.2秒の移動が毎回やり直しになり、指から遅れてガタつく。
+     動かして見せたいとき（ならべる・そろえる・元にもどす）だけ #canvas.anim-move で付ける。
+   ※ will-change を1枚ずつ付けると、写真の枚数だけ描画レイヤーができて重くなる（Safariで顕著）。
+     拡大縮小は #canvas 1枚の変形で済んでいるので、写真には付けない。 */
 .item{
   position:absolute;left:0;top:0;
   transform-origin:0 0;
-  will-change:transform;
   background:var(--panel-2);
   box-shadow:var(--item-shadow);
   transition:opacity .25s ease,filter .25s ease;
+}
+#canvas.anim-move .item{
+  transition:opacity .25s ease, filter .25s ease,
+             transform .42s cubic-bezier(.2,.8,.2,1), width .42s cubic-bezier(.2,.8,.2,1), height .42s cubic-bezier(.2,.8,.2,1);
 }
 .item.dim{opacity:.14;filter:grayscale(.5);pointer-events:none}
 .item img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;user-select:none;-webkit-user-drag:none}
@@ -553,30 +567,28 @@ body.calm #canvas.smooth{transition:none}
    ========================================================================== */
 :root{
   --radius-item:14px;      /* 盤面の写真。Pinterestのピンと同じくらい */
+  --radius-photo:6px;      /* 盤面の写真の角（四隅に小片を重ねて見せる。大きいと重なりで欠けが見える） */
   --radius-card:18px;      /* ボードのカード */
   --ring:rgba(255,255,255,.10);   /* 1本線の代わりの、極細のふち */
   /* 影は1枚でなく重ねる。遠くの影＋近くの影でやわらかく見える（Apple的） */
   --item-shadow:0 1px 2px rgba(0,0,0,.28), 0 8px 24px rgba(0,0,0,.42);
   --item-shadow-hover:0 2px 6px rgba(0,0,0,.30), 0 18px 44px rgba(0,0,0,.52);
+  --hover-ring:rgba(255,255,255,.55);
 }
 
 /* ---- 盤面の写真 ---- */
 /* ※ overflow:hidden は使わない。選択枠の角マークとリサイズの取っ手が外側にあるため */
-.item{
-  border-radius:var(--radius-item);
-  transition:opacity .25s ease, filter .25s ease, box-shadow .22s ease, transform .22s ease;
-}
+.item{border-radius:var(--radius-item)}
 .item>img,.item>.broken,.item .note-body{border-radius:var(--radius-item)}
 .item .note-tag{border-radius:0 0 var(--radius-item) var(--radius-item)}
 .item>img{box-shadow:inset 0 0 0 1px var(--ring)}
 
-/* 指では浮かせない（タップでちらつくため）。マウスのときだけ持ち上げる */
+/* マウスで上に乗ったときは、細い輪で示すだけにする。
+   以前は transform で浮かせていたが、写真の位置そのものも transform で決めているため
+   値を取り合っていた（位置の指定が勝つので浮かず、影の描き直しだけが毎回走っていた）。
+   outline は描画が軽く、位置にも触れない。 */
 @media (hover:hover) and (pointer:fine){
-  .item:not(.sel):not(.picked):hover{
-    box-shadow:var(--item-shadow-hover);
-    transform:translateY(-2px);
-  }
-  body.calm .item:hover{transform:none}
+  .item:not(.sel):not(.picked):hover{outline:1.5px solid var(--hover-ring);outline-offset:2px}
 }
 
 /* 選択中は、角マークではなく面で示す（Apple的にうるさくしない） */
@@ -812,3 +824,725 @@ body.board-white .gcell,body.board-paper .gcell{box-shadow:0 1px 2px rgba(0,0,0,
   color:var(--board-fg);opacity:.5;
   white-space:nowrap;pointer-events:none;
 }
+
+/* ==========================================================================
+   デザイン 第3版（2026-10-21）
+   Pinterest＝写真が主役・大きな角丸と余白、Apple＝段階の整った文字と控えめな面、
+   ファッション誌＝白黒を基本に、差し色は「選んだもの」にだけ使う。
+   明るい版／暗い版は html[data-theme] で切り替える（設定の「テーマ」。既定はMacに合わせる）。
+   これまでの上書き（第1版・第2版）をまとめて受け止めるため、ファイルの最後に置く。
+   色はすべて変数で書く（直書きすると、明るい版で暗い色が残る）。
+   ========================================================================== */
+
+/* ---------- 色と影の変数 ---------- */
+:root,
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#ffffff;
+  --chrome:#ffffff;          /* 上のバー・下のドック */
+  --sheet:#f2f2f6;           /* 下から出るシートの地 */
+  --cell:#ffffff;            /* シートの中の行 */
+  --cell-2:#f0f0f4;          /* 一段沈んだ面（区切りスイッチの帯など） */
+  --cell-press:#e6e6eb;
+  --panel:#ffffff;           /* ↓ 以前の名前。古い指定もこの値で塗られる */
+  --panel-2:#f0f0f4;
+  --line:rgba(0,0,0,.09);
+  --ring:rgba(0,0,0,.07);
+  --fg:#111114;
+  --fg-2:#6e6e73;
+  --fg-3:#a8a8ad;
+  --dim:#6e6e73;
+  --primary:#111114;         /* 主なボタンは黒地に白 */
+  --on-primary:#ffffff;
+  --accent:#2f6df6;          /* JSが設定の差し色で上書きする */
+  --on-accent:#ffffff;
+  --ok:var(--accent);        /* 「選んだもの」は差し色にそろえる（以前は緑と2色あった） */
+  --danger:#d8382f;
+  --scrim:rgba(18,18,22,.30);
+  --tile:#f0f0f4;            /* シートの行の頭のアイコン置き場 */
+  --hover-ring:rgba(0,0,0,.26);
+  --seg-on:#ffffff;
+  --shadow-card:0 1px 2px rgba(0,0,0,.05), 0 6px 18px rgba(0,0,0,.07);
+  --shadow-pop:0 18px 50px rgba(0,0,0,.16), 0 3px 10px rgba(0,0,0,.06);
+  --item-shadow-hover:0 2px 6px rgba(0,0,0,.12), 0 14px 34px rgba(0,0,0,.16);
+  --ease-spring:cubic-bezier(.32,.72,0,1);
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0b0b0d;
+  --chrome:#121214;
+  --sheet:#1b1b1e;
+  --cell:#2a2a2e;
+  --cell-2:#121214;
+  --cell-press:#38383d;
+  --panel:#1b1b1e;
+  --panel-2:#2a2a2e;
+  --line:rgba(255,255,255,.09);
+  --ring:rgba(255,255,255,.08);
+  --fg:#f2f2f4;
+  --fg-2:#9d9da4;
+  --fg-3:#64646a;
+  --dim:#9d9da4;
+  --primary:#f2f2f4;
+  --on-primary:#111114;
+  --accent:#5b93ff;
+  --on-accent:#ffffff;
+  --danger:#ff645b;
+  --scrim:rgba(0,0,0,.55);
+  --tile:#3a3a40;
+  --hover-ring:rgba(255,255,255,.5);
+  --seg-on:#48484e;
+  --shadow-card:0 1px 2px rgba(0,0,0,.45), 0 8px 24px rgba(0,0,0,.38);
+  --shadow-pop:0 20px 56px rgba(0,0,0,.62);
+  --item-shadow-hover:0 2px 6px rgba(0,0,0,.30), 0 18px 44px rgba(0,0,0,.52);
+}
+
+body{background:var(--bg);color:var(--fg)}
+/* 日本語の見出しやボタンは字間を詰める（Appleの和文の組み方） */
+h1,h2,h3,button,.chip,.set-head,.pc-row>label,.home-title,.bc-name{font-feature-settings:"palt"}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- 上のバー ---------- */
+#topbar{
+  height:calc(56px + env(safe-area-inset-top));
+  gap:4px;padding-inline:10px;
+  background:var(--chrome);border-bottom:1px solid var(--line);
+}
+#app-title{font-size:1.06rem;font-weight:650;letter-spacing:-.005em;color:var(--fg)}
+#board-sub{font-size:.74rem;color:var(--fg-2);letter-spacing:.01em;margin-top:1px;opacity:1}
+body.at-home #app-title{font-size:.78rem;font-weight:700;letter-spacing:.24em}
+.icon-btn{width:38px;height:38px;border-radius:50%;color:var(--fg);transition:background .15s ease}
+.icon-btn svg{width:21px;height:21px;stroke-width:1.7}
+@media (hover:hover) and (pointer:fine){ .icon-btn:hover{background:var(--cell-2)} }
+.icon-btn:active{background:var(--cell-press)}
+.icon-btn.on{background:var(--cell-2)}
+.icon-btn.on svg{stroke:var(--accent)}
+
+/* ---------- ホーム：大きな見出しと、表紙で選ぶボード一覧 ---------- */
+#home-scroll{padding:22px 22px 36px;background:var(--bg)}
+.home-title{margin:4px 2px 2px;font-size:2.05rem;font-weight:750;letter-spacing:-.02em;line-height:1.15;color:var(--fg)}
+.home-lead{margin:0 2px 24px;font-size:.86rem;color:var(--fg-2);min-height:1.2em}
+#board-grid{gap:30px 18px}
+@media(min-width:1280px){#board-grid{grid-template-columns:repeat(5,1fr)}}
+/* カードの箱はやめ、表紙（写真の寄せ集め）だけを角丸で見せ、名前はその下に置く */
+.board-card{background:transparent;border:none;border-radius:0;box-shadow:none;overflow:visible;transition:none}
+.board-card:active{transform:none}
+.bc-thumbs{
+  aspect-ratio:4/3;border-radius:20px;overflow:hidden;
+  grid-template-columns:2fr 1fr;grid-template-rows:1fr 1fr;gap:2px;
+  background:var(--cell-2);box-shadow:var(--shadow-card);
+  transition:transform .3s var(--ease-spring), box-shadow .3s ease;
+}
+.bc-thumbs > :first-child{grid-row:span 2}
+.bc-thumbs > :nth-child(n+4){display:none}
+.bc-thumbs.one,.bc-thumbs:has(> .ph:only-child){grid-template-columns:1fr}
+.bc-thumbs img,.bc-thumbs .ph{background:var(--cell-2)}
+.bc-meta{padding:11px 4px 0}
+.bc-name{font-size:.96rem;font-weight:650;letter-spacing:-.005em;color:var(--fg)}
+.bc-count{font-size:.76rem;color:var(--fg-2);margin-top:2px;letter-spacing:.01em}
+@media (hover:hover) and (pointer:fine){
+  .board-card:hover{transform:none;box-shadow:none}
+  .board-card:hover .bc-thumbs{transform:translateY(-3px);box-shadow:var(--shadow-pop)}
+}
+.board-card:active .bc-thumbs{transform:scale(.985)}
+.home-stats{margin-top:40px;color:var(--fg-3);font-size:.72rem}
+#home-empty{padding:60px 20px}
+#home-empty .empty-big{font-size:1.1rem}
+
+/* ---------- 下のドック ---------- */
+.dock{
+  height:calc(70px + env(safe-area-inset-bottom));
+  background:var(--chrome);border-top:1px solid var(--line);
+  justify-content:center;gap:4px;padding-inline:10px;
+}
+.dock-btn{
+  min-width:66px;max-width:98px;height:54px;padding:0 8px;
+  border-radius:14px;gap:4px;color:var(--fg-2);
+  transition:background .15s ease, color .15s ease, transform .12s ease;
+}
+.dock-btn svg{width:22px;height:22px;stroke-width:1.7}
+.dock-btn span{font-size:.69rem;letter-spacing:.02em;opacity:1;color:inherit;font-weight:500}
+@media (hover:hover) and (pointer:fine){ .dock-btn:not([disabled]):hover{background:var(--cell-2);color:var(--fg)} }
+.dock-btn:not([disabled]):active{transform:scale(.95)}
+.dock-btn[disabled]{opacity:.35}
+/* 主な動作（いれる）は黒い丸。ここだけ目に入るようにする */
+.dock-btn.primary{color:var(--fg);height:60px}
+.dock-btn.primary svg{
+  width:34px;height:34px;padding:7px;border-radius:50%;
+  background:var(--primary);stroke:var(--on-primary);stroke-width:2.2;
+}
+.dock-btn.primary span{font-weight:650}
+/* ホームの「あたらしいボード」は、黒い横長のボタン1つ */
+#view-home .dock-btn.primary{
+  flex-direction:row;gap:8px;height:46px;max-width:none;padding:0 24px 0 18px;
+  border-radius:999px;background:var(--primary);color:var(--on-primary);
+}
+#view-home .dock-btn.primary svg{width:20px;height:20px;padding:0;background:none;stroke:var(--on-primary)}
+#view-home .dock-btn.primary span{font-size:.9rem}
+@media (hover:hover) and (pointer:fine){ #view-home .dock-btn.primary:hover{background:var(--primary);color:var(--on-primary);opacity:.88} }
+/* 取り消し系は少し離して、色を抑える */
+.dock-btn.danger::before{background:var(--line)}
+.dock-btn.danger svg{stroke:var(--fg-2)}
+.dock-btn.danger span{color:var(--fg-2)}
+@media (hover:hover) and (pointer:fine){
+  .dock-btn.danger:hover svg{stroke:var(--danger)}
+  .dock-btn.danger:hover span{color:var(--danger)}
+}
+.select-count{color:var(--fg);font-weight:600}
+
+/* ---------- 盤面のまわり ---------- */
+#zoom-readout{
+  top:12px;right:12px;padding:5px 11px;border-radius:999px;
+  background:var(--chrome);border:1px solid var(--line);box-shadow:var(--shadow-card);
+  color:var(--fg-2);font-size:.7rem;letter-spacing:.04em;
+}
+#palette{top:46px;right:12px;background:var(--chrome);border:1px solid var(--line);box-shadow:var(--shadow-card)}
+.item.sel{outline:2.5px solid var(--accent);outline-offset:3px}
+.item.picked{outline:2.5px solid var(--accent);outline-offset:3px}
+.item .pick-no{background:var(--accent);color:var(--on-accent);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.item.text-item{box-shadow:var(--item-shadow)}
+#marquee{border:1.5px solid var(--accent);background:color-mix(in srgb, var(--accent) 12%, transparent);border-radius:6px}
+.guide{background:var(--accent)}
+.handle{background:#fff}
+#board-empty .empty-big{font-size:1.15rem;font-weight:650}
+
+/* ---------- Pinterestのように眺める表示 ---------- */
+#grid-view{padding:18px 18px 36px}
+#grid-scroll{column-gap:14px}
+.gcell{margin:0 0 14px;border-radius:16px;background:var(--cell-2);box-shadow:none}
+.gcell img{border-radius:16px}
+.gcell .gnote{border-radius:0 0 16px 16px}
+@media (hover:hover) and (pointer:fine){
+  .gcell{transition:transform .25s var(--ease-spring), box-shadow .25s ease}
+  .gcell:hover{transform:translateY(-3px);box-shadow:var(--shadow-pop)}
+}
+.gcell.picked{outline:3px solid var(--accent);outline-offset:2px}
+.gcell .gno{background:var(--accent);color:var(--on-accent)}
+
+/* ---------- 下から出るシート（iPhoneの設定画面のような「まとまった一覧」） ---------- */
+#scrim{background:var(--scrim);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);animation:mb-fade .25s ease}
+@keyframes mb-fade{from{opacity:0}}
+.sheet{
+  left:0;right:0;margin:0 auto;max-width:620px;
+  background:var(--sheet);border:none;border-radius:26px 26px 0 0;
+  padding:8px 18px calc(22px + env(safe-area-inset-bottom));
+  box-shadow:0 -12px 44px rgba(0,0,0,.16);
+  animation:mb-sheet .44s var(--ease-spring);
+}
+@keyframes mb-sheet{from{transform:translateY(100%)}to{transform:none}}
+.sheet-grab{width:36px;height:5px;border-radius:3px;background:var(--fg-3);opacity:.45;margin:4px auto 14px}
+.sheet h2{margin:0 2px 10px;font-size:1.28rem;font-weight:750;letter-spacing:-.01em;color:var(--fg)}
+.sheet-note{font-size:.8rem;line-height:1.75;color:var(--fg-2);margin:4px 2px 12px}
+.sheet-note b{color:var(--fg)}
+.set-head{margin:22px 16px 7px;font-size:.74rem;font-weight:600;letter-spacing:.06em;color:var(--fg-2)}
+.sheet h2 + .set-head{margin-top:4px}
+
+/* 行：つながったものは1つの角丸の箱にまとめ、間を細い線で区切る */
+.row-btn{
+  position:relative;margin-top:10px;padding:11px 14px;gap:14px;
+  border-radius:14px;background:var(--cell);color:var(--fg);
+  transition:background .12s ease;
+}
+.row-btn + .row-btn{margin-top:0;border-top-left-radius:0;border-top-right-radius:0}
+.row-btn:has(+ .row-btn){border-bottom-left-radius:0;border-bottom-right-radius:0}
+.row-btn + .row-btn::before{content:"";position:absolute;top:0;left:58px;right:0;height:1px;background:var(--line)}
+.row-btn:active{background:var(--cell-press)}
+@media (hover:hover) and (pointer:fine){ .row-btn:hover{background:var(--cell-press)} }
+.row-btn > svg{
+  width:30px;height:30px;padding:6px;border-radius:9px;flex:0 0 auto;
+  background:var(--tile);stroke:var(--fg);stroke-width:1.8;
+}
+.row-btn b{font-size:.93rem;font-weight:600}
+.row-btn i{font-size:.76rem;color:var(--fg-2);line-height:1.45}
+.row-btn.danger{background:var(--cell);border:none;color:var(--danger);margin-top:14px}
+.row-btn.danger > svg{stroke:var(--danger)}
+
+/* シートの一番下のボタンは、まとめずに丸い大きなボタン */
+.sheet-actions{gap:10px;margin-top:18px}
+.sheet-actions .row-btn,.undo-row .row-btn{
+  margin:0;border-radius:999px;padding:14px 16px;justify-content:center;
+  font-size:.92rem;font-weight:600;
+}
+.sheet-actions .row-btn::before,.undo-row .row-btn::before{display:none}
+.row-btn.solid{background:var(--primary);color:var(--on-primary);border:none}
+.row-btn.ghost{background:var(--cell);color:var(--fg);border:none}
+@media (hover:hover) and (pointer:fine){
+  .row-btn.solid:hover{background:var(--primary);opacity:.88}
+}
+.undo-row{gap:10px;margin:2px 0 6px}
+.undo-row .row-btn{padding:11px 14px;font-size:.84rem}
+.undo-row .row-btn > svg{width:20px;height:20px;padding:0;background:none}
+
+/* 設定・印刷の1行（左に名前、右に選択肢）。これもつながったら1つの箱に */
+.pc-row{
+  position:relative;margin-top:10px;padding:9px 10px 9px 16px;
+  background:var(--cell);border-radius:14px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+}
+.pc-row + .pc-row{margin-top:0;border-top-left-radius:0;border-top-right-radius:0}
+.pc-row:has(+ .pc-row){border-bottom-left-radius:0;border-bottom-right-radius:0}
+.pc-row + .pc-row::before{content:"";position:absolute;top:0;left:16px;right:0;height:1px;background:var(--line)}
+.pc-row > label{width:auto;flex:0 0 auto;font-size:.9rem;color:var(--fg);font-weight:500}
+/* 選択肢は「区切りスイッチ」：くぼんだ帯の中で、選んだものだけが浮く */
+.pc-opts{gap:2px;padding:2px;border-radius:10px;background:var(--cell-2);flex-wrap:wrap;justify-content:flex-end}
+.pc-opts .chip{
+  border:none;background:transparent;color:var(--fg-2);
+  padding:7px 11px;border-radius:8px;font-size:.78rem;font-weight:500;
+}
+.pc-opts .chip.on{
+  background:var(--seg-on);color:var(--fg);font-weight:650;
+  box-shadow:0 1px 3px rgba(0,0,0,.12), 0 0 0 .5px rgba(0,0,0,.04);
+}
+.pc-opts .chip[disabled]{opacity:.35}
+.swatches .chip i{width:10px;height:10px;border-radius:50%;background:var(--c);display:inline-block;flex:0 0 auto}
+@media (hover:hover) and (pointer:fine){ .pc-opts .chip:not(.on):hover{color:var(--fg)} }
+
+/* タグなど、それ以外の丸いチップ */
+.chip{border-radius:999px;border:1px solid var(--line);background:var(--cell);color:var(--fg)}
+.chip.on{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+@media (hover:hover) and (pointer:fine){ .chip:hover{border-color:var(--fg-3);color:var(--fg)} .chip.on:hover{color:var(--on-primary)} }
+.tag-row.suggest .chip{background:transparent}
+
+/* 入力欄 */
+.fld-area,.fld-input,#search-input,#prompt-input,#prompt-area,.sheet textarea,
+.color-pick-row input[type=text]{
+  background:var(--cell);border:1px solid var(--line);color:var(--fg);border-radius:12px;
+}
+.fld-area:focus,.fld-input:focus,#search-input:focus,#prompt-input:focus,#prompt-area:focus,
+.sheet textarea:focus,.color-pick-row input[type=text]:focus{
+  outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.fld-label{color:var(--fg-2);font-size:.74rem;margin:16px 4px 6px}
+#search-input{padding:13px 14px;font-size:.92rem}
+#pin-snippet{background:var(--cell-2);color:var(--fg-2);border:1px solid var(--line)}
+.color-pick-row input[type=color]{border:1px solid var(--line);background:var(--cell);border-radius:12px}
+
+/* ボードの一覧（うつす）も、つながった1つの箱に */
+.mv-row{position:relative;background:var(--cell);border-radius:14px;margin-top:10px}
+.mv-row + .mv-row{margin-top:0;border-top-left-radius:0;border-top-right-radius:0}
+.mv-row:has(+ .mv-row){border-bottom-left-radius:0;border-bottom-right-radius:0}
+.mv-row + .mv-row::before{content:"";position:absolute;top:0;left:62px;right:0;height:1px;background:var(--line)}
+.mv-row:active{background:var(--cell-press)}
+.mv-row .mv-nm{font-size:.9rem;color:var(--fg)}
+.mv-row .mv-ct{font-size:.74rem;color:var(--fg-2)}
+.mv-row .mv-th{border-radius:9px;background:var(--cell-2)}
+
+/* ゴミ箱・重複さがし・USB */
+.tr-cell,.dup-cell{border-radius:12px;background:var(--cell-2)}
+.dup-row{border-bottom:1px solid var(--line)}
+.usb-thumbs img,.usb-thumbs .ph2{background:var(--cell-2)}
+
+/* ---------- 確認ダイアログ ---------- */
+#prompt{background:var(--scrim);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+.prompt-box{
+  width:min(380px,100%);background:var(--sheet);border:none;border-radius:22px;
+  padding:22px 20px 16px;box-shadow:var(--shadow-pop);animation:mb-pop .3s var(--ease-spring);
+}
+@keyframes mb-pop{from{opacity:0;transform:scale(.94)}}
+.prompt-title{font-size:1rem;font-weight:650;text-align:center;margin-bottom:14px;color:var(--fg);line-height:1.5}
+.prompt-actions{gap:10px;justify-content:stretch}
+.prompt-actions .cmp-btn{flex:1;padding:12px;border-radius:999px;font-size:.9rem;font-weight:600;background:var(--cell);color:var(--fg)}
+.prompt-actions .cmp-btn.solid{background:var(--primary);color:var(--on-primary)}
+
+/* ---------- 進み具合と、お知らせ ---------- */
+#progress{background:var(--scrim);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.prog-box{width:min(340px,86vw);background:var(--sheet);padding:24px 22px 18px;border-radius:22px;box-shadow:var(--shadow-pop)}
+.prog-label{font-size:.94rem;color:var(--fg)}
+.prog-track{height:5px;border-radius:3px;background:var(--cell-2)}
+.prog-sub{color:var(--fg-2);font-size:.76rem}
+#prog-cancel{background:var(--cell);color:var(--fg);border-radius:999px;padding:10px 20px;font-size:.84rem}
+#toast{
+  bottom:calc(var(--dock-h) + 18px);
+  background:rgba(24,24,27,.94);color:#fff;border:none;border-radius:18px;
+  padding:12px 20px;font-size:.84rem;line-height:1.6;
+  box-shadow:0 12px 34px rgba(0,0,0,.24);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+}
+
+/* ---------- 写真を大きく見る画面（くらべる・1枚表示・切り抜き）：写真のため黒地のまま ---------- */
+#compare-bar,#viewer-bar,#crop-bar{background:#0c0c0e;border-top:1px solid rgba(255,255,255,.08)}
+#compare-bar .cmp-btn,#viewer-bar .cmp-btn,#crop-bar .cmp-btn,#crop-ratios .cmp-btn{
+  background:rgba(255,255,255,.11);color:#fff;border-radius:999px;padding:9px 15px;
+  font-size:.78rem;font-weight:500;letter-spacing:.01em;
+}
+#compare-bar .cmp-btn.on,#compare-bar .cmp-btn.solid,#viewer-bar .cmp-btn.solid,
+#crop-bar .cmp-btn.solid,#crop-ratios .cmp-btn.on{background:#fff;color:#111}
+#viewer-meta{color:#9d9da4}
+.ov-handle,.ov-handle::after{background:#fff}
+.bc-thumbs.two{grid-template-columns:1fr 1fr}
+.bc-thumbs.two > *{grid-row:span 2}
+
+/* ==========================================================================
+   アイテムの見た目（共通部品）：補正・反転・傾き・不透明度・固定・参考ポイント
+   ========================================================================== */
+/* 傾きは写真の中心で回す（位置は translate なので、原点を変えても位置はずれない） */
+.item{transform-origin:50% 50%}
+/* 不透明度は中身にだけかける。.item 自体にかけると「さがす」で薄く沈める表示と取り合う */
+.item .fx{opacity:var(--op,1)}
+/* 色温度の重ね：ソフトライトで写真とだけ混ざるよう、写真ごとに合成を閉じる */
+.item.has-warm{isolation:isolate}
+.item > .warm{position:absolute;inset:0;mix-blend-mode:soft-light;border-radius:var(--radius-item);pointer-events:none}
+/* 固定：右上に小さな鍵。動かそうとしても動かない */
+.item.locked::after{
+  content:"";position:absolute;top:7px;right:7px;width:22px;height:22px;border-radius:50%;
+  background:rgba(17,17,20,.72) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'%3E%3Crect x='6' y='11' width='12' height='9' rx='2'/%3E%3Cpath d='M9 11V8a3 3 0 016 0v3'/%3E%3C/svg%3E") center/13px no-repeat;
+  display:block;pointer-events:none;border:none;
+}
+.item.sel.locked::after{display:block}
+/* 参考ポイント（光・ポーズ…）：左上の小さな札 */
+.item .ref-badge{
+  position:absolute;top:7px;left:7px;max-width:calc(100% - 14px);
+  padding:4px 9px;border-radius:999px;
+  background:rgba(17,17,20,.72);color:#fff;
+  font-size:11px;font-weight:600;letter-spacing:.02em;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;
+}
+.item.picked .ref-badge{left:36px;max-width:calc(100% - 43px)}
+
+/* ---- 描いた線・図形 ---- */
+/* 箱全体で反応すると、大きな丸の内側にある写真が掴めなくなる。線の上だけで反応させる */
+.item.draw-item{background:transparent;box-shadow:none;pointer-events:none;border-radius:0}
+/* アイコン用の svg{width:22px} が効いてしまうので、描いた線は入れ物いっぱいに広げる */
+.item.draw-item svg{display:block;overflow:visible;width:100%;height:100%;fill:none}
+.item.draw-item path.hit{pointer-events:stroke;cursor:move}
+.item.draw-item.sel,.item.draw-item .handle{pointer-events:auto}
+.item.draw-item.sel{outline-style:dashed}
+
+/* ---- チェックリスト（ショットリスト） ---- */
+.item.list-item{background:#ffffff;box-shadow:var(--item-shadow)}
+.list-body{position:absolute;inset:0;padding:14px 15px;overflow:hidden;color:#18181b;font-size:13px;line-height:1.45}
+.list-title{font-weight:700;font-size:14px;letter-spacing:.01em;margin-bottom:8px;font-feature-settings:"palt"}
+.list-body ul{list-style:none;margin:0;padding:0}
+.list-body li{display:flex;align-items:flex-start;gap:8px;padding:4px 0;border-top:1px solid rgba(0,0,0,.06)}
+.list-body li:first-child{border-top:none}
+.list-body .chk{
+  flex:0 0 auto;width:15px;height:15px;margin-top:1px;border-radius:4px;
+  border:1.5px solid #9a9aa0;background:#fff;pointer-events:auto;cursor:pointer;
+}
+.list-body li.done .chk{background:#18181b;border-color:#18181b;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  background-size:12px;background-position:center;background-repeat:no-repeat}
+.list-body li.done .lt{color:#9a9aa0;text-decoration:line-through}
+.list-body li.must .lt{font-weight:700}
+.list-body li.must .lt::before{content:"★ ";color:var(--accent)}
+
+/* ---- 吹き出し：文字カードの1つの形 ---- */
+.item.text-item.bubble{background:#ffffff;border-radius:18px;overflow:visible}
+.item.text-item.bubble .note-body{color:#18181b;padding:14px 16px;font-size:.84rem;border-radius:18px}
+.item.text-item.bubble::before{
+  content:"";position:absolute;width:22px;height:22px;background:#ffffff;
+  top:auto;right:auto;bottom:-9px;left:22px;transform:rotate(45deg);border-radius:0 0 4px 0;
+  border:none;pointer-events:none;
+  box-shadow:3px 3px 6px rgba(0,0,0,.06);
+}
+.item.text-item.bubble.tail-br::before{left:auto;right:22px}
+.item.text-item.bubble.tail-tl::before{bottom:auto;top:-9px;border-radius:4px 0 0 0;box-shadow:none}
+.item.text-item.bubble.tail-tr::before{bottom:auto;top:-9px;left:auto;right:22px;border-radius:4px 0 0 0;box-shadow:none}
+/* 選択の角マーク（::before/::after）は第2版で消してあるが、吹き出しは ::before を尻尾に使う */
+.item.text-item.bubble.sel::before{display:block}
+
+/* ==========================================================================
+   道具（2026-10-22）
+   ========================================================================== */
+/* ---- 道具シート：アイコンと名前のタイル ---- */
+.tool-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px}
+.tool{
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:7px;
+  padding:13px 4px 11px;border-radius:14px;background:var(--cell);color:var(--fg);
+  transition:background .12s ease, transform .12s ease, opacity .12s ease;
+}
+.tool svg{width:24px;height:24px;stroke-width:1.7}
+.tool span{font-size:.72rem;font-weight:500;line-height:1.3;text-align:center}
+.tool:active{transform:scale(.96)}
+@media (hover:hover) and (pointer:fine){ .tool:hover{background:var(--cell-press)} }
+.tool.need{opacity:.4}
+.tool.on{background:var(--primary);color:var(--on-primary)}
+#sheet-tools .set-head{margin-top:18px}
+
+/* ---- 倍率の表示：押すと全体表示 ---- */
+#zoom-readout{pointer-events:auto;cursor:pointer;font:inherit;font-size:.7rem}
+@media (hover:hover) and (pointer:fine){ #zoom-readout:hover{color:var(--fg)} }
+/* 白黒・反転で見ているときの印（押すと戻る） */
+#view-pills{position:absolute;top:12px;right:76px;display:flex;gap:6px;z-index:12}
+.view-pill{
+  display:inline-flex;align-items:center;gap:7px;padding:5px 9px 5px 12px;border-radius:999px;
+  background:var(--primary);color:var(--on-primary);font-size:.72rem;font-weight:600;box-shadow:var(--shadow-card);
+}
+.view-pill i{font-style:normal;opacity:.7;font-size:.9em}
+#canvas-wrap.view-gray #canvas{filter:grayscale(1)}
+#canvas-wrap.view-mirror{transform:scaleX(-1)}
+
+/* ---- 描くとき ---- */
+#canvas-wrap.drawing{cursor:crosshair}
+#canvas-wrap.drawing .item{pointer-events:none}
+.draw-live{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
+#draw-dock{gap:10px;justify-content:center}
+.draw-row{display:flex;align-items:center;gap:4px;overflow-x:auto;scrollbar-width:none;min-width:0}
+.draw-row::-webkit-scrollbar{display:none}
+.dtool{
+  flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:3px;
+  width:50px;height:52px;justify-content:center;border-radius:12px;color:var(--fg-2);
+}
+.dtool svg{width:21px;height:21px;stroke-width:1.8}
+.dtool span{font-size:.62rem}
+.dtool.on{background:var(--cell-2);color:var(--fg)}
+.draw-sep{flex:0 0 auto;width:1px;height:28px;background:var(--line);margin:0 4px}
+.dcol{
+  flex:0 0 auto;width:26px;height:26px;border-radius:50%;background:var(--c);
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);margin:0 2px;
+}
+.dcol.on{box-shadow:0 0 0 2px var(--chrome),0 0 0 4px var(--accent)}
+.dwid{flex:0 0 auto;width:32px;height:32px;border-radius:50%;display:grid;place-items:center}
+.dwid i{display:block;width:var(--s);height:var(--s);border-radius:50%;background:var(--fg-2)}
+.dwid.on{background:var(--cell-2)} .dwid.on i{background:var(--fg)}
+#draw-done{flex:0 0 auto}
+
+/* ---- 写真を整える：写真が見えるよう、低めのシートで後ろを暗くしない ---- */
+#scrim.clear{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
+.sheet.peek{max-height:56vh;box-shadow:0 -10px 40px rgba(0,0,0,.22)}
+.sl-group{background:var(--cell);border-radius:14px;padding:4px 0;margin-top:10px}
+.sl-row{display:grid;grid-template-columns:92px 1fr 52px;align-items:center;gap:10px;padding:8px 14px 8px 16px;position:relative}
+.sl-row + .sl-row::before{content:"";position:absolute;top:0;left:16px;right:0;height:1px;background:var(--line)}
+.sl-row label{font-size:.88rem;color:var(--fg)}
+.sl-row output{font-size:.8rem;color:var(--fg-2);text-align:right;font-variant-numeric:tabular-nums}
+.sl-row.off{opacity:.38}
+.sl-row input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;margin:0;
+  background:linear-gradient(90deg,var(--fg) 0,var(--fg) var(--p,50%),var(--cell-2) var(--p,50%));outline:none;
+}
+.sl-row input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 4px rgba(0,0,0,.28),0 0 0 .5px rgba(0,0,0,.08);cursor:pointer;
+}
+.sl-row input[type=range]::-moz-range-thumb{width:22px;height:22px;border:none;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.28)}
+.adj-quick{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.adj-quick .chip[disabled]{opacity:.35}
+
+/* ---- 参考にするところ ---- */
+.ref-row .chip{padding:7px 13px}
+
+/* ---- 配色をつくる ---- */
+.harm-base{display:flex;align-items:center;gap:14px;background:var(--cell);border-radius:14px;padding:12px 14px;margin:6px 0 12px}
+.harm-base input[type=color]{width:52px;height:52px;padding:0;border:none;border-radius:12px;background:none;cursor:pointer}
+.harm-base input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+.harm-base input[type=color]::-webkit-color-swatch{border:none;border-radius:12px}
+.harm-base b{display:block;font-family:ui-monospace,Menlo,monospace;font-size:.95rem}
+.harm-base i{font-style:normal;font-size:.74rem;color:var(--fg-2)}
+.harm-row{display:grid;grid-template-columns:1fr auto;grid-template-areas:"head put" "sw put";gap:6px 12px;
+  background:var(--cell);padding:12px 14px;align-items:center;position:relative}
+.harm-row:first-child{border-radius:14px 14px 0 0}
+.harm-row:last-child{border-radius:0 0 14px 14px}
+.harm-row + .harm-row::before{content:"";position:absolute;top:0;left:14px;right:0;height:1px;background:var(--line)}
+.harm-head{grid-area:head} .harm-head b{font-size:.88rem;margin-right:8px} .harm-head i{font-style:normal;font-size:.72rem;color:var(--fg-2)}
+.harm-sw{grid-area:sw;display:flex;gap:4px}
+.harm-sw span{flex:1;height:30px;border-radius:7px;box-shadow:inset 0 0 0 1px var(--ring)}
+.harm-row .chip{grid-area:put}
+
+/* ---- プレゼン ---- */
+#present{position:fixed;inset:0;z-index:75;background:#0b0b0d;display:flex;flex-direction:column}
+#present-stage{flex:1;min-height:0;display:grid;place-items:center;touch-action:pan-y;user-select:none}
+.pr-photo{border-radius:6px;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:mb-pop .4s var(--ease-spring)}
+.pr-nav{
+  position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;
+  display:grid;place-items:center;background:rgba(255,255,255,.1);color:#fff;
+}
+.pr-nav svg{width:24px;height:24px;stroke:#fff;stroke-width:2}
+#present-prev{left:16px} #present-next{right:16px}
+@media (hover:hover) and (pointer:fine){ .pr-nav:hover{background:rgba(255,255,255,.2)} }
+#present-bar{
+  flex:0 0 auto;display:flex;align-items:center;gap:16px;padding:12px 18px calc(12px + env(safe-area-inset-bottom));
+  color:#d8d8dc;font-size:.84rem;
+}
+#present-count{font-variant-numeric:tabular-nums;color:#8e8e94;flex:0 0 auto}
+#present-cap{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#present-bar .cmp-btn{background:rgba(255,255,255,.12);color:#fff;border-radius:999px;padding:9px 16px}
+
+/* ---- 1枚表示：画像の入れ物と道具 ---- */
+#viewer-stage{flex:1;min-height:0;position:relative;padding-top:env(safe-area-inset-top)}
+#viewer-stage #viewer-img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding-top:env(safe-area-inset-top)}
+#viewer.eyedrop #viewer-stage{cursor:crosshair}
+.viewer-tools{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;min-width:0;flex:0 1 auto}
+.viewer-tools::-webkit-scrollbar{display:none}
+.viewer-tools .cmp-btn{flex:0 0 auto}
+#viewer-bar .cmp-btn.on{background:#fff;color:#111}
+@media (max-width:760px){ #viewer-meta{display:none} }
+#viewer-guide{position:absolute;pointer-events:none;overflow:visible}
+#viewer-guide .gl line{stroke:rgba(255,255,255,.7);stroke-width:1}
+#viewer-guide .gp circle{fill:rgba(255,255,255,.85)}
+#viewer-guide .gs{fill:rgba(0,0,0,.55)}
+#viewer-guide .gf{fill:none;stroke:#fff;stroke-width:1.5}
+#viewer-guide .gt{fill:#fff;font-size:13px;font-weight:600;font-family:-apple-system,"Hiragino Sans",sans-serif}
+#viewer-pick{
+  position:absolute;display:flex;align-items:center;gap:10px;padding:8px 8px 8px 10px;border-radius:16px;
+  background:rgba(24,24,27,.94);color:#fff;box-shadow:0 12px 30px rgba(0,0,0,.4);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:3;
+}
+#vp-sw{width:30px;height:30px;border-radius:8px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
+#vp-hex{font-family:ui-monospace,Menlo,monospace;font-size:.86rem;margin-right:4px}
+#viewer-pick .cmp-btn{background:rgba(255,255,255,.14);color:#fff;border-radius:999px;padding:8px 13px;font-size:.76rem}
+#viewer-pick .cmp-btn.solid{background:#fff;color:#111}
+#viewer-info{
+  position:absolute;right:14px;top:calc(14px + env(safe-area-inset-top));width:min(320px,calc(100% - 28px));
+  padding:14px 16px;border-radius:18px;background:rgba(24,24,27,.92);color:#eee;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 14px 40px rgba(0,0,0,.45);z-index:3;
+}
+.vi-rows div{display:grid;grid-template-columns:72px 1fr;gap:10px;padding:5px 0;font-size:.8rem;line-height:1.5}
+.vi-rows div + div{border-top:1px solid rgba(255,255,255,.08)}
+.vi-rows b{color:#9d9da4;font-weight:500}
+.histo{display:block;width:100%;height:64px;margin-top:12px}
+.histo path{fill:rgba(255,255,255,.75)}
+.histo-legend{display:flex;justify-content:space-between;font-size:.66rem;color:#8e8e94;margin-top:4px}
+/* ---- グリッド表示でも、補正・参考ポイント・チェックリスト・吹き出しを同じに見せる ---- */
+.gcell.has-warm{isolation:isolate}
+.gcell .warm{position:absolute;inset:0;mix-blend-mode:soft-light;border-radius:16px;pointer-events:none}
+.gcell .ref-badge{
+  position:absolute;top:8px;left:8px;max-width:calc(100% - 16px);padding:4px 9px;border-radius:999px;
+  background:rgba(17,17,20,.72);color:#fff;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.gcell.glist{background:#ffffff;position:relative}
+.gcell.gbubble{background:#ffffff}
+.gcell.gbubble .gtext-body{color:#18181b}
+@media print{
+  .pi-painted{background:transparent}
+  .pi-painted img{width:100%;height:100%;object-fit:contain;display:block}
+  .p-one .pi-painted img,.p-one > img{max-height:82vh}
+}
+.tr-cell.tr-draw{background:var(--cell-2);display:grid;place-items:center;padding:10px}
+.tr-cell.tr-draw svg{width:100%;height:100%;opacity:.7}
+
+/* ---- 盤面の写真の角丸（軽い作り） ----
+   角丸の切り抜き・角丸の影は、盤面を動かして新しい場所が見えるたびに何百枚ぶん描き直しになり重い
+   （実測: 写真300枚・Mac版(WebKit)で、動かしている間に合計1.3秒止まる）。
+   写真は四角のまま描き、四隅に盤面の背景色の小片（.cn）を重ねて丸く見せる（同じ条件で0.08秒）。
+   小片の絵は app.js の setCornerArt() が背景色から作る。影も四角になるが、ぼかしが大きいので見分けはつかない。
+   選んでいる写真だけは枠を丸く出したいので角丸に戻す（数枚なら重くない）。
+   小片は重なった下の写真にも乗るので、丸みは 6px（--radius-photo）に抑えて欠けを見えなくしてある */
+#canvas .item.photo-item,#canvas .item.photo-item>img,#canvas .item.photo-item>.broken,
+#canvas .item.photo-item>.warm,#canvas .item.photo-item>.note-tag{border-radius:0}
+#canvas .item.photo-item.sel,#canvas .item.photo-item.picked{border-radius:var(--radius-photo)}
+#canvas .item.photo-item>.cn{
+  position:absolute;inset:0;pointer-events:none;
+  background:
+    var(--cn-tl) 0 0/var(--cn-r) var(--cn-r) no-repeat,
+    var(--cn-tr) 100% 0/var(--cn-r) var(--cn-r) no-repeat,
+    var(--cn-bl) 0 100%/var(--cn-r) var(--cn-r) no-repeat,
+    var(--cn-br) 100% 100%/var(--cn-r) var(--cn-r) no-repeat;
+}
+.item>.cn{display:none}
+#canvas .item.photo-item>.cn{display:block}
+
+
+/* ==================== 選んだものの設定パネル ====================
+   盤面には重ねない：開いている間は、パネルの幅だけ盤面（と右上の小物）を左へ寄せる */
+#view-board{--insp-w:300px;--insp-h:44vh}
+#inspector{
+  position:absolute;top:0;right:0;bottom:calc(70px + env(safe-area-inset-bottom));width:var(--insp-w);z-index:16;
+  display:flex;flex-direction:column;background:var(--chrome);border-left:1px solid var(--line);
+}
+#view-board.with-insp #canvas-wrap,#view-board.with-insp #grid-view{margin-right:var(--insp-w)}
+#view-board.with-insp #zoom-readout,#view-board.with-insp #palette{right:calc(var(--insp-w) + 12px)}
+#view-board.with-insp #view-pills{right:calc(var(--insp-w) + 76px)}
+.insp-head{display:flex;align-items:center;justify-content:space-between;padding:12px 10px 8px 16px;border-bottom:1px solid var(--line)}
+.insp-head b{font-size:.92rem;font-weight:600;color:var(--fg)}
+#insp-body{flex:1;overflow-y:auto;padding:6px 14px 24px;-webkit-overflow-scrolling:touch}
+.insp-sec{margin-top:14px}
+.insp-h{font-size:.72rem;color:var(--fg-2);font-weight:600;letter-spacing:.04em;margin:0 2px 6px;display:flex;gap:8px;align-items:baseline}
+.insp-h i{font-style:normal;font-weight:400;color:var(--dim);font-size:.66rem}
+.insp-acts{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:6px;margin-top:10px}
+.insp-act{display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 4px 8px;border-radius:12px;
+  background:var(--cell);color:var(--fg);font-size:.68rem}
+.insp-act svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.insp-act.danger{color:var(--danger,#d6453d)}
+.insp-act[disabled]{opacity:.35}
+@media (hover:hover) and (pointer:fine){ .insp-act:not([disabled]):hover{background:var(--cell-2)} }
+#insp-body .tag-row{gap:6px}
+#insp-body .chip{font-size:.74rem;padding:5px 11px}
+#insp-body .chip.sug{opacity:.62}
+#insp-body .chip.part{background:var(--cell-2);border-style:dashed}
+#insp-body .fld-input,#insp-body .fld-area{width:100%;box-sizing:border-box;font-size:.84rem}
+#insp-body .fld-area{min-height:64px;resize:vertical}
+#insp-body .tag-row + .fld-input{margin-top:8px}
+.insp-size{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px 8px;align-items:center}
+.insp-size .lbl{font-size:.74rem;color:var(--fg-2)}
+.insp-size .num{padding:7px 8px;font-variant-numeric:tabular-nums}
+.insp-size + .tag-row{margin-top:8px}
+#insp-body .sl-group{margin-top:0}
+#insp-body .sl-row{grid-template-columns:70px 1fr 44px;padding:7px 12px}
+#insp-body .sl-row label{font-size:.78rem}
+#insp-body .sl-group + .tag-row{margin-top:8px}
+.insp-align{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.insp-align .chip{padding:6px 4px;text-align:center;justify-content:center}
+
+/* 狭い画面（携帯など）では、下側に出す */
+@media (max-width:720px){
+  #inspector{top:auto;left:0;width:auto;height:var(--insp-h);border-left:none;border-top:1px solid var(--line);
+    border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.12)}
+  #view-board.with-insp #canvas-wrap,#view-board.with-insp #grid-view{margin-right:0;margin-bottom:var(--insp-h)}
+  #view-board.with-insp #zoom-readout,#view-board.with-insp #palette{right:12px}
+  #view-board.with-insp #view-pills{right:76px}
+}
+
+/* ---- キーボードのショートカット一覧 ---- */
+.keys-g{font-size:.72rem;color:var(--fg-2);font-weight:600;margin:16px 4px 6px}
+.keys-t{background:var(--cell);border-radius:14px;overflow:hidden}
+.keys-r{display:grid;grid-template-columns:132px 1fr;gap:12px;align-items:center;padding:9px 14px;font-size:.84rem;color:var(--fg)}
+.keys-r + .keys-r{border-top:1px solid var(--line)}
+.keys-r kbd{font:inherit;font-size:.78rem;color:var(--fg-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ==================== ホーム：ボード｜ストック ==================== */
+.home-seg{display:inline-flex;gap:2px;padding:3px;border-radius:999px;background:var(--cell);margin:4px 0 2px}
+.home-seg button{padding:7px 18px;border-radius:999px;font-size:.84rem;font-weight:600;color:var(--fg-2)}
+.home-seg button.on{background:var(--chrome);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+#stock-q{margin:6px 0 2px;max-width:520px}
+#stock-filters{margin:8px 0 12px}
+#stock-filters .chip{font-size:.76rem}
+/* 写真アプリのように、正方形で並べる（何千枚でも探しやすいように） */
+#stock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:6px;padding-bottom:24px}
+.scell{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--cell);padding:0;display:block}
+.scell img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.scell.on{outline:3px solid var(--accent);outline-offset:-3px}
+.scell.on::after{content:"";position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;
+  background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 12.5l4 4 8-9' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/14px no-repeat;
+  box-shadow:0 1px 4px rgba(0,0,0,.3)}
+/* どのボードにも載っていない写真には、左下に小さな点 */
+.scell .loose{position:absolute;left:7px;bottom:7px;width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 0 1.5px rgba(0,0,0,.35)}
+@media (hover:hover) and (pointer:fine){ .scell:hover img{filter:brightness(.92)} }
+#stock-more{height:1px}
+.pickboard-list{display:flex;flex-direction:column;gap:2px;max-height:52vh;overflow-y:auto}
+/* ストックから開いた1枚表示では、ボードの写真を変える道具を出さない */
+#viewer.from-stock #viewer-rotate,#viewer.from-stock #viewer-crop,#viewer.from-stock #viewer-uncrop,
+#viewer.from-stock #viewer-colors,#viewer.from-stock #vp-place{display:none!important}
+#sheet-shortcuts code{font:.78rem ui-monospace,Menlo,monospace;background:var(--cell);padding:1px 6px;border-radius:6px;color:var(--fg)}
+#sheet-shortcuts .steps li{margin-bottom:10px}
+
+/* ==================== 使い方（説明書） ==================== */
+#help-q{margin:4px 0 2px}
+.help-toc{margin:10px 0 4px}
+.help-toc .chip{font-size:.74rem}
+.help-sec{margin-top:18px;scroll-margin-top:12px}
+.help-sec h3{font-size:.86rem;font-weight:700;color:var(--fg);margin:0 4px 8px}
+.help-list{background:var(--cell);border-radius:14px;overflow:hidden}
+.help-row{padding:11px 14px}
+.help-row + .help-row{border-top:1px solid var(--line)}
+.help-row b{display:flex;align-items:center;gap:8px;font-size:.86rem;font-weight:600;color:var(--fg)}
+.help-row p{margin:4px 0 0;font-size:.8rem;line-height:1.65;color:var(--fg-2)}
+.help-mac{font-size:.62rem;font-weight:600;color:var(--fg-2);border:1px solid var(--line);border-radius:999px;padding:1px 7px}
+
+/* ---- 付箋・吹き出しの色（it.bg）と、設定パネルの色えらび ---- */
+.item.text-item[style*="--card-bg"]{background:var(--card-bg)}
+.item.text-item[style*="--card-bg"] .note-body{color:var(--card-fg)}
+.item.text-item.bubble[style*="--card-bg"]::before{background:var(--card-bg)}
+.insp-swatches{display:flex;flex-wrap:wrap;gap:8px}
+.insp-sw{width:28px;height:28px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+.insp-sw.on{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ==================== 動画 ==================== */
+/* 盤面とストックの表紙に ▶ と長さ（盤面の倍率に合わせて潰れないよう、写真の大きさに対する割合で置く） */
+.item.video-item .vbadge,.scell .vbadge{position:absolute;left:8px;bottom:8px;padding:3px 8px;border-radius:999px;
+  background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:600;font-style:normal;pointer-events:none;letter-spacing:.02em}
+.scell .vbadge{left:auto;right:6px;bottom:6px;font-size:10px;padding:2px 6px}
+#viewer-stage #viewer-video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+/* 動画を見ているときは、写真用の道具を出さない */
+#viewer.is-video #viewer-rotate,#viewer.is-video #viewer-crop,#viewer.is-video #viewer-uncrop,#viewer.is-video #viewer-colors,
+#viewer.is-video #viewer-eyedrop,#viewer.is-video #viewer-guide-btn,#viewer.is-video #viewer-info-btn{display:none!important}
