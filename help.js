@@ -76,7 +76,8 @@ const HELP = {
       ['インスタで試す', [
         ['なにができる', 'ホームの「インスタ」で、インスタのプロフィールそっくりの画面に写真を3列で並べ、上げたらどう見えるかを試せます。インスタには何も送りません。グリッドは今のインスタと同じ 3:4（1:1 にも切り替えられる）。左上がいちばん新しい投稿です。'],
         ['写真を入れる', '「写真を足す」でストックから（◎本命・○候補でしぼれる）。ストックで選んで「そのほか」→「インスタのグリッドで試す」、ボードの「道具」→「インスタで試す」からも。'],
-        ['並べ替え', 'ドラッグで動かします（携帯は少し長押ししてから）。「まぜる」で「これから投稿」の写真だけをランダムに。'],
+        ['並べ替え', 'ドラッグで動かします（携帯は少し長押ししてから）。「まぜる」で「これから投稿」の写真だけをランダムに。⌘Z（または「元にもどす」）で戻せます。⇧⌘Z でやり直し。'],
+        ['パソコンでの見え方', '左に操作、右に携帯の画面がまるごと出ます。携帯の画面の中だけがスクロールします。窓を大きくすると、携帯の画面も大きくなります。'],
         ['全体の雰囲気を見る', '「ぼかして見る」で色のまとまり、「白黒で見る」で明るさのつながりを確かめられます。白い画面・黒い画面も切り替えられます。'],
         ['1つずつ', '写真を押すと：位置を直す（ずらす・大きく）・これから投稿／投稿済み・キャプションの下書き・先頭へ・アイコンにする・分けて並べる（3・6・9枚のパズル）・はずす。'],
         ['プロフィール', 'ユーザーネーム・名前・プロフィール文・フォロワーの数・アイコンは、押すと変えられます。'],
@@ -194,7 +195,8 @@ const HELP = {
       ['Try on Instagram', [
         ['What it does', '“Instagram” on the home screen lays your photos out in three columns on a look-alike Instagram profile, so you can see how they’d look before posting. Nothing is posted. The grid is 3:4 like Instagram now (1:1 is available too). The top-left is the newest post.'],
         ['Adding photos', '“Add photos” picks from Stock (filter to ◎ Top pick or ○ Candidate). You can also select in Stock and choose “More” → “Try on an Instagram grid”, or use “Tools” → “Try on Instagram” on a board.'],
-        ['Reordering', 'Drag to move (on a phone, press and hold first). “Shuffle” mixes only the planned photos.'],
+        ['Reordering', 'Drag to move (on a phone, press and hold first). “Shuffle” mixes only the planned photos. ⌘Z (or “Undo”) takes it back; ⇧⌘Z redoes.'],
+        ['On a computer', 'Controls sit on the left and the whole phone screen shows on the right. Only the phone screen scrolls. Make the window bigger for a bigger phone.'],
         ['Checking the mood', '“Blur” shows how the colors sit together and “View in gray” shows the light-and-dark flow. Switch between a light and dark screen too.'],
         ['One post at a time', 'Tap a photo to reposition or zoom it, mark it planned or posted, draft a caption, move it to the front, use it as the profile photo, split it into a 3/6/9-piece puzzle, or remove it.'],
         ['Profile', 'Tap the username, name, bio, follower counts or profile photo to change them.'],

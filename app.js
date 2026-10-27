@@ -3048,6 +3048,9 @@ document.addEventListener('keydown', (e) => {
   // （見えないところで写真が動いたり、はずれたり、ボードが替わったりしていた）。説明書・設定などの共通キーだけ効かせる
   if (!$('#viewer').hidden || !$('#compare').hidden || !$('#scrim').hidden) return void runKeymap(e, 'any');
   if (S.view === 'home' && STOCK.on && stockKey(e)) return;
+  if (S.view === 'home' && typeof IG !== 'undefined' && IG.on && (e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+    e.preventDefault(); return void igUndo(e.shiftKey);
+  }
   if (runKeymap(e, 'any')) return;
   if (S.view !== 'board') return;
   const meta = e.metaKey || e.ctrlKey;
@@ -7099,6 +7102,7 @@ function showStock(on) {
   $('#home-boards').hidden = STOCK.on;
   $('#stock-view').hidden = !STOCK.on;
   $('#insta-view').hidden = true;
+  $('#view-home').classList.remove('ig-mode');
   if (!STOCK.on) STOCK.sel.clear();
   syncStockDock();
   if (STOCK.on) loadStock();
@@ -7718,6 +7722,28 @@ function igRefreshTile(t) {
   const i = IG.plan.tiles.indexOf(t), el = $('#ig-grid').children[i], rec = IG.recs.get(t.imageId);
   if (el && rec) igPaint(el.querySelector('.ig-pic'), rec, igWindow(rec, t, igAspect()));
 }
+/* 元に戻す・やり直す（並べ替え・まぜる・足す・はずす・パズル・位置を直す など。案ごと覚えておく） */
+const IGH = { past: [], future: [] };
+const igSnap = () => JSON.stringify({ tiles: IG.plan.tiles, avatar: IG.plan.avatar || null });
+function igPush() {
+  if (!IG.plan) return;
+  IGH.past.push({ id: IG.plan.id, s: igSnap() });
+  if (IGH.past.length > 60) IGH.past.shift();
+  IGH.future = [];
+}
+function igUndo(redo) {
+  const from = redo ? IGH.future : IGH.past, to = redo ? IGH.past : IGH.future;
+  const h = from.pop();
+  if (!h) return toast(redo ? 'やり直せるものがありません' : '元に戻せるものがありません', 1400);
+  const p = IG.plans.find(x => x.id === h.id);
+  if (!p) return;
+  if (IG.plan !== p) igUse(p);
+  to.push({ id: p.id, s: igSnap() });
+  const v = JSON.parse(h.s);
+  p.tiles = v.tiles; p.avatar = v.avatar;
+  igSave(); igRender();
+  toast(redo ? 'やり直しました' : '元に戻しました', 1200);
+}
 /* ホームの3つ目のタブ */
 function showInsta(on) {
   IG.on = !!on;
@@ -7728,6 +7754,7 @@ function showInsta(on) {
   $('#home-boards').hidden = STOCK.on || IG.on;
   $('#stock-view').hidden = !STOCK.on;
   $('#insta-view').hidden = !IG.on;
+  $('#view-home').classList.toggle('ig-mode', IG.on);     // パソコンでは、左に操作・右に携帯の画面
   syncStockDock();
   if (IG.on) igRender();
 }
@@ -7741,16 +7768,20 @@ async function igAddImages(ids, newPlanName) {
     const p = igNewPlan(newPlanName);
     IG.plans.unshift(p); igUse(p);
   }
+  igPush();
   IG.plan.tiles.unshift(...ids.map(id => ({ id: uid(), imageId: id, posted: false })));
   igSave();
   if (S.view === 'board') goHome();
   closeSheets();
   showInsta(true);
   $('#home-scroll').scrollTop = 0;
+  $('#ig-screen').scrollTop = 0;
   toast(ids.length + ' 枚を「' + IG.plan.name + '」の左上に並べました', 2400);
 }
 $('#stock-insta').onclick = () => igAddImages([...STOCK.sel]);
 
+/* スクロールしているのは、パソコンでは携帯の画面の中、携帯ではホーム全体 */
+const igScroller = () => { const s = $('#ig-screen'); return getComputedStyle(s).overflowY === 'auto' && s.scrollHeight > s.clientHeight + 1 ? s : $('#home-scroll'); };
 /* ---- ドラッグで並べ替え（マウスは少し動かしたら・携帯は少し長押ししてから） ---- */
 (() => {
   const grid = $('#ig-grid');
@@ -7766,6 +7797,7 @@ $('#stock-insta').onclick = () => igAddImages([...STOCK.sel]);
   };
   function begin() {
     st.started = true;
+    igPush();
     const r = st.el.getBoundingClientRect(), pic = st.el.querySelector('.ig-pic');
     const gh = document.createElement('div');
     gh.className = 'ig-ghost';
@@ -7779,7 +7811,7 @@ $('#stock-insta').onclick = () => igAddImages([...STOCK.sel]);
     // 上下の端に近づいたら、ホームの画面を送る
     scrollT = setInterval(() => {
       if (!st) return;
-      const box = $('#home-scroll'), r2 = box.getBoundingClientRect();
+      const box = igScroller(), r2 = box.getBoundingClientRect();
       const v = st.y < r2.top + 70 ? -14 : st.y > r2.bottom - 70 ? 14 : 0;
       if (v) { box.scrollTop += v; move(); }
     }, 30);
@@ -7788,13 +7820,13 @@ $('#stock-insta').onclick = () => igAddImages([...STOCK.sel]);
     st.ghost.style.left = st.x + 'px'; st.ghost.style.top = st.y + 'px';
     const to = nearest(st.x, st.y);
     if (to < 0 || to === st.i) return;
-    const arr = IG.plan.tiles;
-    const [t] = arr.splice(st.i, 1);
+    const arr = IG.plan.tiles, from = st.i;
+    const [t] = arr.splice(from, 1);
     arr.splice(to, 0, t);
     st.i = to;
-    igRenderGrid();
-    st.el = grid.children[to];
-    st.el.classList.add('dragging');
+    // 動かした1枚だけを入れ替える（全部を作り直すと、枚数が多いときにちらついた）
+    grid.insertBefore(st.el, grid.children[to > from ? to + 1 : to] || null);
+    [...grid.children].forEach((el, k) => { el.dataset.i = k; });
   }
   grid.addEventListener('pointerdown', (e) => {
     const el = e.target.closest('.ig-tile');
@@ -7834,6 +7866,7 @@ async function igOpenTile(i) {
   const t = IG.plan.tiles[i];
   if (!t) return;
   IG.tile = t;
+  IG.tilePushed = false;
   $('#igtile-title').textContent = (i + 1) + ' 番目の投稿';
   $('#igtile-frame').classList.toggle('r11', IG.plan.ratio === '11');
   $('#igtile-zoom').value = (t.pos && t.pos.k) || 1;
@@ -7861,6 +7894,7 @@ function igTileEditorPaint() {
     if (!rec || t.puzzle) return;
     try { f.setPointerCapture(e.pointerId); } catch (err) { }
     const win = igWindow(rec, t, igAspect());
+    if (!IG.tilePushed) { igPush(); IG.tilePushed = true; }
     d = { x: e.clientX, y: e.clientY, cx: win.x + win.w / 2, cy: win.y + win.h / 2, w: win.w, h: win.h, fw: f.clientWidth, fh: f.clientHeight };
   });
   f.addEventListener('pointermove', (e) => {
@@ -7877,13 +7911,15 @@ function igTileEditorPaint() {
 $('#igtile-zoom').oninput = () => {
   const t = IG.tile;
   if (!t || t.puzzle) return;
+  if (!IG.tilePushed) { igPush(); IG.tilePushed = true; }
   const p = t.pos || { cx: .5, cy: .5 };
   t.pos = { cx: p.cx, cy: p.cy, k: +$('#igtile-zoom').value };
   igTileEditorPaint(); igRefreshTile(t); igSave();
 };
-$('#igtile-reset').onclick = () => { const t = IG.tile; if (!t || t.puzzle) return; delete t.pos; $('#igtile-zoom').value = 1; igTileEditorPaint(); igRefreshTile(t); igSave(); };
+$('#igtile-reset').onclick = () => { const t = IG.tile; if (!t || t.puzzle) return; igPush(); delete t.pos; $('#igtile-zoom').value = 1; igTileEditorPaint(); igRefreshTile(t); igSave(); };
 $$('#igtile-state button').forEach(b => b.onclick = () => {
   const t = IG.tile; if (!t) return;
+  igPush();
   t.posted = b.dataset.v === 'posted';
   if (!t.posted) delete t.posted;
   $$('#igtile-state button').forEach(x => x.classList.toggle('on', x === b));
@@ -7894,15 +7930,17 @@ const igGroupOf = (t) => t.puzzle ? IG.plan.tiles.filter(x => x.puzzle && x.puzz
 $('#igtile-first').onclick = () => {
   const t = IG.tile; if (!t) return;
   const grp = igGroupOf(t);                     // パズルはまとめて動かす
+  igPush();
   IG.plan.tiles = IG.plan.tiles.filter(x => !grp.includes(x));
   IG.plan.tiles.unshift(...grp);
   closeSheets(); igRenderGrid(); igSave();
   toast('左上（次に投稿する場所）に動かしました');
 };
-$('#igtile-avatar').onclick = () => { const t = IG.tile; if (!t) return; IG.plan.avatar = t.imageId; closeSheets(); igSave(); igRender(); toast('アイコンにしました'); };
+$('#igtile-avatar').onclick = () => { const t = IG.tile; if (!t) return; igPush(); IG.plan.avatar = t.imageId; closeSheets(); igSave(); igRender(); toast('アイコンにしました'); };
 $$('.ig-split-btns .chip').forEach(b => b.onclick = () => {
   const t = IG.tile; if (!t || t.puzzle) return;
   const n = +b.dataset.n, rows = n / 3, g = uid();
+  igPush();
   const arr = IG.plan.tiles, i = arr.indexOf(t);
   arr.splice(i, 1);
   const start = Math.min(i - (i % 3), arr.length);   // 段のはじめにそろえる（ずれると、つながって見えない）
@@ -7915,12 +7953,14 @@ $$('.ig-split-btns .chip').forEach(b => b.onclick = () => {
 $('#igtile-unsplit').onclick = () => {
   const t = IG.tile; if (!t || !t.puzzle) return;
   const grp = igGroupOf(t), arr = IG.plan.tiles, at = arr.indexOf(grp[0]);
+  igPush();
   IG.plan.tiles = arr.filter(x => !grp.includes(x));
   IG.plan.tiles.splice(at, 0, { id: uid(), imageId: t.imageId, ...(t.posted ? { posted: true } : {}) });
   closeSheets(); igRenderGrid(); igSave();
 };
 $('#igtile-remove').onclick = () => {
   const t = IG.tile; if (!t) return;
+  igPush();
   IG.plan.tiles = IG.plan.tiles.filter(x => x !== t);
   closeSheets(); igRenderGrid(); igSave();
   toast('この案からはずしました（写真はストックに残っています）');
@@ -7993,6 +8033,7 @@ $('#btn-ig-shuffle').onclick = () => {
   const planned = idx.length >= 2;
   if (!planned) idx = arr.map((t, i) => !t.puzzle ? i : -1).filter(i => i >= 0);
   if (idx.length < 2) return toast('まぜられる写真がありません');
+  igPush();
   const mixed = shuffled(idx.map(i => arr[i]), (Date.now() % 2147483647) || 1);
   idx.forEach((i, k) => { arr[i] = mixed[k]; });
   igRenderGrid(); igSave();
@@ -8004,9 +8045,10 @@ const IGP = { sel: [], filter: 'all', q: '', mode: 'add', limit: 240 };
 async function igOpenPicker(mode) {
   IGP.sel = []; IGP.mode = mode || 'add'; IGP.q = ''; IGP.limit = 240;
   $('#igpick-q').value = '';
-  if (!STOCK.info.size) await loadStock();
+  await loadStock();               // 開くたびに読み直す（あとから取り込んだ写真も出るように）
   igPickRender();
   openSheet('#sheet-igpick');
+  $('#igpick-grid').scrollTop = 0;
 }
 function igPickList() {
   const words = IGP.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -8019,30 +8061,49 @@ function igPickList() {
     return words.every(w => inf && inf.text.includes(w));
   });
 }
+/* しぼり込みを変えたときだけ作り直す。押して選ぶときは、印だけ付け替える
+   （以前は押すたびに作り直していたので、下の方を選ぶと一覧の先頭へ戻ってしまった） */
 function igPickRender() {
   const fb = $('#igpick-filters');
   fb.innerHTML = '';
   [['all', 'すべて'], ['out', 'この案にまだ無い'], ['m1', MARKS[1].s + ' ' + MARKS[1].name], ['m2', MARKS[2].s + ' ' + MARKS[2].name]].forEach(([v, l]) => {
     const c = inspEl('button', 'chip' + (IGP.filter === v ? ' on' : ''), l);
-    c.onclick = () => { IGP.filter = v; IGP.limit = 240; igPickRender(); };
+    c.onclick = () => { IGP.filter = v; IGP.limit = 240; igPickRender(); $('#igpick-grid').scrollTop = 0; };
     fb.appendChild(c);
   });
-  const list = igPickList(), g = $('#igpick-grid');
+  IGP.list = igPickList();
+  const g = $('#igpick-grid');
   g.innerHTML = '';
-  list.slice(0, IGP.limit).forEach(r => {
+  igPickAppend(0);
+  if (!IGP.list.length) g.appendChild(inspEl('p', 'more', STOCK.all.length ? '見つかりませんでした' : 'ストックに写真がありません。まず写真を取り込んでください'));
+  igPickSync();
+}
+function igPickAppend(from) {
+  const g = $('#igpick-grid'), old = g.querySelector(':scope > .more');
+  if (old) old.remove();
+  const frag = document.createDocumentFragment();
+  IGP.list.slice(from, IGP.limit).forEach(r => {
     const b = document.createElement('button');
     b.dataset.id = r.id;
     b.style.backgroundImage = 'url("' + blobURL(r.id, 't', r.thumb || r.full) + '")';
-    const k = IGP.sel.indexOf(r.id);
-    if (k >= 0) { b.classList.add('on'); b.appendChild(inspEl('b', '', String(k + 1))); }
-    g.appendChild(b);
+    frag.appendChild(b);
   });
-  if (list.length > IGP.limit) {
-    const m = inspEl('button', 'more', 'もっと見る（あと ' + (list.length - IGP.limit) + ' 枚）');
-    m.onclick = () => { IGP.limit += 240; igPickRender(); };
+  g.appendChild(frag);
+  if (IGP.list.length > IGP.limit) {
+    const m = inspEl('button', 'more', 'もっと見る（あと ' + (IGP.list.length - IGP.limit) + ' 枚）');
+    m.onclick = () => { const n = IGP.limit; IGP.limit += 240; igPickAppend(n); igPickSync(); };
     g.appendChild(m);
   }
-  if (!list.length) g.appendChild(inspEl('p', 'more', STOCK.all.length ? '見つかりませんでした' : 'ストックに写真がありません。まず写真を取り込んでください'));
+}
+/* 選んだ順の番号と、足すボタン */
+function igPickSync() {
+  $$('#igpick-grid button[data-id]').forEach(b => {
+    const k = IGP.sel.indexOf(b.dataset.id);
+    b.classList.toggle('on', k >= 0);
+    let n = b.querySelector('b');
+    if (k >= 0) { if (!n) { n = document.createElement('b'); b.appendChild(n); } n.textContent = String(k + 1); }
+    else if (n) n.remove();
+  });
   const go = $('#igpick-go');
   go.disabled = !IGP.sel.length;
   go.textContent = IGP.mode === 'avatar' ? 'アイコンにする' : (IGP.sel.length ? IGP.sel.length + ' 枚を足す' : '足す');
@@ -8052,14 +8113,15 @@ $('#igpick-grid').addEventListener('click', (e) => {
   const id = b.dataset.id, k = IGP.sel.indexOf(id);
   if (IGP.mode === 'avatar') IGP.sel = k >= 0 ? [] : [id];
   else if (k >= 0) IGP.sel.splice(k, 1); else IGP.sel.push(id);
-  igPickRender();
+  igPickSync();
 });
 let igpQT = 0;
-$('#igpick-q').addEventListener('input', () => { clearTimeout(igpQT); igpQT = setTimeout(() => { IGP.q = $('#igpick-q').value; IGP.limit = 240; igPickRender(); }, 160); });
+$('#igpick-q').addEventListener('input', () => { clearTimeout(igpQT); igpQT = setTimeout(() => { IGP.q = $('#igpick-q').value; IGP.limit = 240; igPickRender(); $('#igpick-grid').scrollTop = 0; }, 160); });
 $('#igpick-close').onclick = closeSheets;
 $('#igpick-go').onclick = async () => {
   if (!IGP.sel.length) return;
   if (IGP.mode === 'avatar') {
+    igPush();
     IG.plan.avatar = IGP.sel[0];
     closeSheets(); igSave(); await igRender();
     return toast('アイコンにしました');
@@ -8068,6 +8130,11 @@ $('#igpick-go').onclick = async () => {
   await igAddImages(IGP.sel.slice());
 };
 $('#btn-ig-add').onclick = () => igOpenPicker('add');
+$('#ig-side-add').onclick = () => igOpenPicker('add');
+$('#ig-side-shuffle').onclick = () => $('#btn-ig-shuffle').click();
+$('#ig-side-export').onclick = () => $('#btn-ig-export').click();
+$('#ig-side-undo').onclick = () => igUndo(false);
+$('#btn-ig-undo').onclick = () => igUndo(false);
 
 /* ---- 書き出す ---- */
 $('#btn-ig-export').onclick = () => openSheet('#sheet-igexport');
@@ -8200,7 +8267,8 @@ async function igDeliver(files, zipName) {
   if (NATIVE) {
     const payload = [];
     for (const f of files) payload.push({ name: f.name, b64: await blobToB64(f.blob) });
-    const r = await mbCall('saveFiles', { files: payload, x: innerWidth / 2, y: innerHeight - 90 }).catch(e => { toast('保存できませんでした<br>' + e, 4200); return null; });
+    const r = await mbCall('saveFiles', { files: payload, x: innerWidth / 2, y: innerHeight - 90, folder: files.length > 1 ? zipName : '' })
+      .catch(e => { if (!/cancel/.test(String(e && e.message || e))) toast('保存できませんでした<br>' + e, 4200); return null; });   // 保存の画面でやめたときは何も言わない
     if (r) toast(files.length + ' 個のファイルを保存しました（' + fmtBytes(size) + '）');
     return;
   }
@@ -8549,7 +8617,8 @@ async function sendOut(how) {
     const payload = [];
     for (const f of files) payload.push({ name: f.name, b64: await blobToB64(f.blob) });
     const btn = $('#send-share').getBoundingClientRect();
-    const r = await mbCall(how === 'share' ? 'share' : 'saveFiles', { files: payload, x: btn.left + btn.width / 2, y: btn.top }).catch(e => { toast('送れませんでした<br>' + e, 4200); return null; });
+    const r = await mbCall(how === 'share' ? 'share' : 'saveFiles', { files: payload, x: btn.left + btn.width / 2, y: btn.top })
+      .catch(e => { if (!/cancel/.test(String(e && e.message || e))) toast('送れませんでした<br>' + e, 4200); return null; });   // 保存の画面でやめたときは何も言わない
     if (r && how !== 'share') toast(files.length + ' 個のファイルを保存しました（' + fmtBytes(size) + '）');
     return;
   }

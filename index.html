@@ -108,43 +108,55 @@
       </div>
       <!-- インスタ：インスタのプロフィールの見え方で並べて、全体の雰囲気が合うかを試す（インスタには何も送らない） -->
       <div id="insta-view" hidden>
-        <h2 class="home-title">インスタ</h2>
-        <p class="home-lead">インスタに上げたらどう並ぶかを試します。写真をドラッグで動かして、全体の色や雰囲気が合うかを見比べられます（インスタには何も送りません）</p>
-        <div id="ig-bar">
-          <label class="st-sort"><span>案</span><select id="ig-plan"></select></label>
-          <button class="chip" id="ig-plan-new">新しい案</button>
-          <button class="chip" id="ig-plan-edit">名前・消す</button>
-          <div class="st-seg" id="ig-ratio" title="グリッドの形">
-            <button data-v="34">3:4（いまのインスタ）</button><button data-v="11">1:1</button>
+        <aside id="ig-side">
+          <h2 class="home-title">インスタ</h2>
+          <p class="home-lead">インスタに上げたらどう並ぶかを試します。写真をドラッグで動かして、全体の色や雰囲気が合うかを見比べられます（インスタには何も送りません）</p>
+          <div id="ig-side-acts">
+            <button class="row-btn solid" id="ig-side-add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span><b>写真を足す</b></span></button>
+            <button class="row-btn" id="ig-side-shuffle"><svg viewBox="0 0 24 24"><path d="M4 7h3l10 10h3M4 17h3l3-3M14 10l3-3h3M18 4l2 3-2 3M18 14l2 3-2 3"/></svg><span><b>まぜる</b><i>「これから投稿」の写真だけ</i></span></button>
+            <button class="row-btn" id="ig-side-export"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 9l5-5 5 5M5 15v4h14v-4"/></svg><span><b>書き出す</b><i>見え方の画像・投稿用の写真</i></span></button>
+            <button class="row-btn" id="ig-side-undo"><svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 0 12h-2"/></svg><span><b>元にもどす</b><i>⌘Z（やり直しは ⇧⌘Z）</i></span></button>
           </div>
-          <div class="st-seg" id="ig-theme" title="インスタの画面の色">
-            <button data-v="light">白い画面</button><button data-v="dark">黒い画面</button>
-          </div>
-          <div class="st-seg" id="ig-look" title="全体の雰囲気を確かめる見方">
-            <button data-v="blur">ぼかして見る</button><button data-v="gray">白黒で見る</button>
-          </div>
-        </div>
-        <div id="ig-phone">
-          <div class="ig-top"><button id="ig-handle" class="ig-handle" title="ユーザーネームを変える">username</button>
-            <span class="ig-top-icons"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span></div>
-          <div class="ig-prof">
-            <button id="ig-avatar" title="アイコンを変える"></button>
-            <div class="ig-stats">
-              <div><b id="ig-n-posts">0</b><span>投稿</span></div>
-              <button id="ig-n-fol-btn"><b id="ig-n-fol">0</b><span>フォロワー</span></button>
-              <button id="ig-n-fing-btn"><b id="ig-n-fing">0</b><span>フォロー中</span></button>
+          <div id="ig-bar">
+            <label class="st-sort"><span>案</span><select id="ig-plan"></select></label>
+            <div class="ig-bar-row"><button class="chip" id="ig-plan-new">新しい案</button><button class="chip" id="ig-plan-edit">名前・消す</button></div>
+            <div class="st-seg" id="ig-ratio" title="グリッドの形">
+              <button data-v="34">3:4（いまのインスタ）</button><button data-v="11">1:1</button>
+            </div>
+            <div class="st-seg" id="ig-theme" title="インスタの画面の色">
+              <button data-v="light">白い画面</button><button data-v="dark">黒い画面</button>
+            </div>
+            <div class="st-seg" id="ig-look" title="全体の雰囲気を確かめる見方">
+              <button data-v="blur">ぼかして見る</button><button data-v="gray">白黒で見る</button>
             </div>
           </div>
-          <div class="ig-bio"><button id="ig-name" title="名前を変える">名前</button><button id="ig-bio-t" title="プロフィール文を変える">プロフィール文</button></div>
-          <div class="ig-btns"><span>プロフィールを編集</span><span>プロフィールをシェア</span></div>
-          <div class="ig-tabs"><i class="on"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/></svg></i><i><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg></i><i><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="10.5" r="2.6"/><path d="M7.5 17.5c1-2.2 2.6-3.2 4.5-3.2s3.5 1 4.5 3.2"/></svg></i></div>
-          <div id="ig-grid"></div>
-          <div id="ig-empty" class="empty" hidden>
-            <p class="empty-big">まだ写真がありません</p>
-            <p class="empty-sub">下の「写真を足す」から、ストックやボードの写真を入れます。<br>左上がいちばん新しい投稿です。</p>
+          <p class="ig-note">写真はドラッグで並べ替え（携帯は少し長押ししてから）。押すと、位置を直す・これから投稿／投稿済み・キャプション・分けて並べる（パズル）など。<br>グリッドは今のインスタと同じ 3:4 です。「投稿用の写真を書き出す」で、この見え方のまま 1080×1440 で保存できます。</p>
+        </aside>
+        <div id="ig-stage">
+          <div id="ig-phone">
+            <div class="ig-status"><b>9:41</b><span><svg viewBox="0 0 24 24"><path d="M3 18h2v-3H3zM8 18h2v-6H8zM13 18h2v-9h-2zM18 18h2V6h-2z"/></svg><svg viewBox="0 0 24 24"><path d="M12 18.5l2-2.3a3 3 0 0 0-4 0zM6.2 12.4l1.6 1.8a6.2 6.2 0 0 1 8.4 0l1.6-1.8a8.6 8.6 0 0 0-11.6 0zM2.8 8.6l1.6 1.8a11.3 11.3 0 0 1 15.2 0l1.6-1.8a13.7 13.7 0 0 0-18.4 0z"/></svg><i class="ig-batt"><i></i></i></span></div>
+            <div id="ig-screen">
+              <div class="ig-top"><button id="ig-handle" class="ig-handle" title="ユーザーネームを変える">username</button>
+                <span class="ig-top-icons"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span></div>
+              <div class="ig-prof">
+                <button id="ig-avatar" title="アイコンを変える"></button>
+                <div class="ig-stats">
+                  <div><b id="ig-n-posts">0</b><span>投稿</span></div>
+                  <button id="ig-n-fol-btn"><b id="ig-n-fol">0</b><span>フォロワー</span></button>
+                  <button id="ig-n-fing-btn"><b id="ig-n-fing">0</b><span>フォロー中</span></button>
+                </div>
+              </div>
+              <div class="ig-bio"><button id="ig-name" title="名前を変える">名前</button><button id="ig-bio-t" title="プロフィール文を変える">プロフィール文</button></div>
+              <div class="ig-btns"><span>プロフィールを編集</span><span>プロフィールをシェア</span></div>
+              <div class="ig-tabs"><i class="on"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/></svg></i><i><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg></i><i><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="10.5" r="2.6"/><path d="M7.5 17.5c1-2.2 2.6-3.2 4.5-3.2s3.5 1 4.5 3.2"/></svg></i></div>
+              <div id="ig-grid"></div>
+              <div id="ig-empty" class="empty" hidden>
+                <p class="empty-big">まだ写真がありません</p>
+                <p class="empty-sub">「写真を足す」から、ストックやボードの写真を入れます。<br>左上がいちばん新しい投稿です。</p>
+              </div>
+            </div>
           </div>
         </div>
-        <p class="ig-note">写真はドラッグで並べ替え（携帯は少し長押ししてから）。押すと、位置を直す・これから投稿／投稿済み・キャプション・分けて並べる（パズル）など。<br>グリッドは今のインスタと同じ 3:4 です。「投稿用の写真を書き出す」で、この見え方のまま 1080×1440 で保存できます。</p>
       </div>
     </div>
     <nav class="dock" id="home-dock">
@@ -165,6 +177,10 @@
       <button id="btn-ig-export" class="dock-btn">
         <svg viewBox="0 0 24 24"><path d="M12 4v11M7 9l5-5 5 5M5 15v4h14v-4"/></svg>
         <span>書き出す</span>
+      </button>
+      <button id="btn-ig-undo" class="dock-btn">
+        <svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5"/><path d="M4 12h10a5 5 0 0 1 0 10h-2"/></svg>
+        <span>元にもどす</span>
       </button>
     </nav>
     <nav class="dock" id="stock-dock" hidden>
