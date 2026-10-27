@@ -73,6 +73,16 @@ const HELP = {
         ['色味が近い写真', '1枚選んで「そのほか」→「色味が近い順に並べる」。その写真に色が近いものから並びます。'],
         ['スペースで見る', '選んでスペースを押すと大きく見られます（もう一度スペースで閉じる）。←→ で次々に、1〜4 でしるし。'],
       ]],
+      ['インスタで試す', [
+        ['なにができる', 'ホームの「インスタ」で、インスタのプロフィールそっくりの画面に写真を3列で並べ、上げたらどう見えるかを試せます。インスタには何も送りません。グリッドは今のインスタと同じ 3:4（1:1 にも切り替えられる）。左上がいちばん新しい投稿です。'],
+        ['写真を入れる', '「写真を足す」でストックから（◎本命・○候補でしぼれる）。ストックで選んで「そのほか」→「インスタのグリッドで試す」、ボードの「道具」→「インスタで試す」からも。'],
+        ['並べ替え', 'ドラッグで動かします（携帯は少し長押ししてから）。「まぜる」で「これから投稿」の写真だけをランダムに。'],
+        ['全体の雰囲気を見る', '「ぼかして見る」で色のまとまり、「白黒で見る」で明るさのつながりを確かめられます。白い画面・黒い画面も切り替えられます。'],
+        ['1つずつ', '写真を押すと：位置を直す（ずらす・大きく）・これから投稿／投稿済み・キャプションの下書き・先頭へ・アイコンにする・分けて並べる（3・6・9枚のパズル）・はずす。'],
+        ['プロフィール', 'ユーザーネーム・名前・プロフィール文・フォロワーの数・アイコンは、押すと変えられます。'],
+        ['案', '並べ方は「案」として保存されます。複製して、並べ方を変えて見比べられます。'],
+        ['書き出す', '「見え方を1枚の画像に」で人に見せる画像を、「投稿用の写真を書き出す」で「これから投稿」の写真を投稿する順に 1080×1440 で（キャプションの一覧も）。01 から順に投稿すると、案のとおりに並びます。'],
+      ]],
       ['送る・書き出す', [
         ['送る（⌘P）', '選んで「送る」。くらべるシート（番号付きPDF）・1枚の画像・1枚ずつのPDF・写真そのまま・盤面のまま。Mac版は AirDrop・メール・メッセージなどへ。'],
         ['写真をコピー（⌘C）', '選んだ写真を、ほかのアプリに貼り付けられる形でコピーします。'],
@@ -180,6 +190,16 @@ const HELP = {
         ['Order, shape, color, size', '“Order”: newest, oldest, by mark, by color, or random (rediscover old photos). Filter by portrait, landscape or square, or by a color dot. S, M, L change the thumbnail size.'],
         ['Similar colors', 'Select one photo, then “More” → “Sort by similar colors”. Photos closest in color come first.'],
         ['Space to look', 'Select and press Space to view large (Space again closes). ← → to move on, 1–4 to mark.'],
+      ]],
+      ['Try on Instagram', [
+        ['What it does', '“Instagram” on the home screen lays your photos out in three columns on a look-alike Instagram profile, so you can see how they’d look before posting. Nothing is posted. The grid is 3:4 like Instagram now (1:1 is available too). The top-left is the newest post.'],
+        ['Adding photos', '“Add photos” picks from Stock (filter to ◎ Top pick or ○ Candidate). You can also select in Stock and choose “More” → “Try on an Instagram grid”, or use “Tools” → “Try on Instagram” on a board.'],
+        ['Reordering', 'Drag to move (on a phone, press and hold first). “Shuffle” mixes only the planned photos.'],
+        ['Checking the mood', '“Blur” shows how the colors sit together and “View in gray” shows the light-and-dark flow. Switch between a light and dark screen too.'],
+        ['One post at a time', 'Tap a photo to reposition or zoom it, mark it planned or posted, draft a caption, move it to the front, use it as the profile photo, split it into a 3/6/9-piece puzzle, or remove it.'],
+        ['Profile', 'Tap the username, name, bio, follower counts or profile photo to change them.'],
+        ['Plans', 'Each arrangement is saved as a plan. Duplicate a plan to try another arrangement side by side.'],
+        ['Export', '“Save the look as one image” makes a picture to show others. “Export photos for posting” saves the planned photos at 1080×1440 in posting order, with captions. Post them from 01 onward and they’ll line up as planned.'],
       ]],
       ['Sending and exporting', [
         ['Send (⌘P)', 'Select and press “Send”: comparison sheet (numbered PDF), one image, one per page (PDF), original photos, or as the canvas. The Mac app can send by AirDrop, Mail, Messages and more.'],

@@ -793,6 +793,7 @@ function goHome() {
   quitDrawing();
   setDock('board');
   renderHome();
+  if (typeof IG !== 'undefined' && IG.on) igRender();
 }
 
 async function touchBoard() {
@@ -2328,7 +2329,8 @@ async function exportAll() {
       imgMeta.push(m);
       if (i % 5 === 4) await new Promise(res => setTimeout(res, 0));
     }
-    const meta = { app: 'MOOD BOARD', version: 1, exportedAt: nowISO(), boards, items, images: imgMeta };
+    const feeds = (await dbAll('meta')).filter(m => m && typeof m.key === 'string' && m.key.startsWith('feed:'));   // インスタの案
+    const meta = { app: 'MOOD BOARD', version: 1, exportedAt: nowISO(), boards, items, images: imgMeta, feeds };
     entries.unshift({ name: 'moodboard.json', data: te.encode(JSON.stringify(meta, null, 1)) });
     progSet(1, 1, 'ZIPにまとめています');
     const zip = await makeZip(entries);
@@ -2408,6 +2410,13 @@ async function importZip(file) {
       }
     }
     if (newItems.length) await dbPutMany('items', newItems);
+    // インスタの案（写真の番号を付け替える。無い写真ははずす）
+    for (const f of (meta.feeds || [])) {
+      const nid = uid();
+      const tiles = (f.tiles || []).filter(t => imgMap.has(t.imageId)).map(t => ({ ...t, id: uid(), imageId: imgMap.get(t.imageId) }));
+      await dbPut('meta', { ...f, key: 'feed:' + nid, id: nid, tiles, avatar: f.avatar && imgMap.get(f.avatar) || null, updatedAt: nowISO() });
+    }
+    if (typeof IG !== 'undefined') IG.plan = null;
     _srcIndex = null;
     progClose();
     toast((meta.boards || []).length + ' 個のボード、' + imgMap.size + ' 枚の写真を読み込みました', 4200);
@@ -5754,6 +5763,13 @@ async function runTool(tool) {
     case 'gray': closeSheets(); return setView('gray', !VIEW.gray);
     case 'mirror': closeSheets(); return setView('mirror', !VIEW.mirror);
     case 'present': closeSheets(); return startPresent();
+    case 'insta': {
+      // 選んでいればその写真を、いまの案の左上に。選んでいなければ、このボードの写真で新しい案を（上から順に）
+      closeSheets();
+      const ph = (S.picking && S.picked.length ? pickedItems() : S.items.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x))).filter(isPhoto);
+      if (!ph.length) return toast('写真がありません');
+      return igAddImages(ph.map(i => i.imageId), S.picking && S.picked.length ? null : S.board.name);
+    }
     case 'scatter': closeSheets(); return scatterItems((t.length >= 2 ? t : S.items).filter(i => i.type !== 'draw'));
     case 'area': closeSheets(); return normalizeArea((t.length >= 2 ? t : S.items).filter(i => i.type !== 'draw'));
   }
@@ -7076,10 +7092,13 @@ const STOCK_CHUNK = 240;
 
 function showStock(on) {
   STOCK.on = !!on;
+  if (typeof IG !== 'undefined') IG.on = false;          // インスタのタブから出る
   $('#seg-boards').classList.toggle('on', !STOCK.on);
   $('#seg-stock').classList.toggle('on', STOCK.on);
+  $('#seg-insta').classList.remove('on');
   $('#home-boards').hidden = STOCK.on;
   $('#stock-view').hidden = !STOCK.on;
+  $('#insta-view').hidden = true;
   if (!STOCK.on) STOCK.sel.clear();
   syncStockDock();
   if (STOCK.on) loadStock();
@@ -7234,9 +7253,11 @@ function syncStockCells() {
 function syncStockDock() {
   if (!$('#stock-dock')) return;
   const n = STOCK.sel.size;
-  $('#home-dock').hidden = STOCK.on;
+  const ig = typeof IG !== 'undefined' && IG.on;
+  $('#home-dock').hidden = STOCK.on || ig;
   $('#stock-dock').hidden = !STOCK.on || n > 0;
   $('#stock-sel-dock').hidden = !STOCK.on || n === 0;
+  $('#insta-dock').hidden = !ig;
   $('#stock-count').textContent = n + ' まい';
   $('#btn-stock-compare').disabled = n < 2 || n > 6;
 }
@@ -7579,6 +7600,633 @@ async function stockSimilar(id) {
 }
 $('#stock-similar').onclick = () => { const r = stockSelRecs(); stockSimilar(r.length === 1 ? r[0].id : null); };
 syncStockTools();
+
+/* ==========================================================================
+   インスタのグリッドで試す（2026-10-27）
+   UNUM・Preview・Planoly などの「フィードの見え方を試す」アプリにならって：
+   ・インスタのプロフィールそっくりの見本（ユーザーネーム・アイコン・投稿数・プロフィール文）に、写真を3列で並べる
+   ・グリッドは今のインスタと同じ 3:4（2025年から。1:1 にも切り替えられる）。左上がいちばん新しい投稿
+   ・ドラッグで並べ替え（携帯は少し長押ししてから）。まぜる（「これから投稿」の分だけ）
+   ・ぼかして見る・白黒で見る・白い画面／黒い画面 で、全体の色や明るさのつながりを確かめる
+   ・1つずつ：位置を直す（ずらす・大きく）・これから投稿／投稿済み・キャプションの下書き・先頭へ・アイコンに・
+     分けて並べる（3・6・9枚のパズル）・はずす
+   ・書き出す：見え方を1枚の画像に（人に見せる）／投稿用の写真を投稿する順に 1080×1440
+   案は meta に 'feed:案のid' で保存する（写真そのものはストックのものを指すだけ。消さない）
+   ========================================================================== */
+var IG = { on: false, plans: [], plan: null, recs: new Map(), look: new Set(), tile: null };
+const igAspect = () => (IG.plan && IG.plan.ratio === '11') ? 1 : 3 / 4;   // 幅÷高さ
+function igNewPlan(name) {
+  const id = uid();
+  return { key: 'feed:' + id, id, name: name || 'インスタの案', handle: 'your_name', dname: '', bio: '', avatar: null,
+    followers: '', following: '', ratio: '34', theme: 'light', tiles: [], createdAt: nowISO(), updatedAt: nowISO() };
+}
+async function igLoad() {
+  const all = (await dbAll('meta')).filter(m => m && typeof m.key === 'string' && m.key.startsWith('feed:'));
+  all.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  IG.plans = all;
+  if (!IG.plans.length) { const p = igNewPlan('インスタの案 1'); IG.plans = [p]; await dbPut('meta', p); }
+  let last = null;
+  try { last = localStorage.getItem('mb_ig_plan'); } catch (e) { }
+  IG.plan = IG.plans.find(p => p.id === last) || IG.plans[0];
+}
+function igUse(plan) {
+  IG.plan = plan;
+  try { localStorage.setItem('mb_ig_plan', plan.id); } catch (e) { }
+}
+let igSaveT = 0;
+function igSave() {
+  if (!IG.plan) return;
+  IG.plan.updatedAt = nowISO();
+  const p = IG.plan;
+  clearTimeout(igSaveT);
+  igSaveT = setTimeout(() => dbPut('meta', p).catch(() => toast('保存できませんでした')), 250);
+}
+async function igRecs(ids) {
+  for (const id of ids) {
+    if (!id || IG.recs.has(id)) continue;
+    IG.recs.set(id, STOCK.all.find(x => x.id === id) || S.imgs.get(id) || await dbGet('images', id) || null);
+  }
+}
+/* 写真のうち、枠に見える範囲（0〜1 の割合）。pos：{cx, cy, k}（真ん中と拡大）／puzzle：{g, cols, rows, r, c} */
+function igWindow(rec, t, A) {
+  const ia = (rec.w || 1) / (rec.h || 1);
+  const cover = (a) => a > ia ? { w: 1, h: ia / a } : { w: a / ia, h: 1 };     // a：枠の 幅÷高さ
+  if (t.puzzle) {
+    const P = t.puzzle, all = cover(A * P.cols / P.rows);
+    const x0 = (1 - all.w) / 2, y0 = (1 - all.h) / 2;
+    return { x: x0 + all.w * P.c / P.cols, y: y0 + all.h * P.r / P.rows, w: all.w / P.cols, h: all.h / P.rows };
+  }
+  const c = cover(A), p = t.pos || { cx: .5, cy: .5, k: 1 };
+  const w = c.w / (p.k || 1), h = c.h / (p.k || 1);
+  return { x: clamp(p.cx - w / 2, 0, 1 - w), y: clamp(p.cy - h / 2, 0, 1 - h), w, h };
+}
+/* 枠に、写真のその範囲だけを見せる（背景画像の大きさと位置で切り取る） */
+function igPaint(el, rec, win, big) {
+  el.style.backgroundImage = 'url("' + (big ? blobURL(rec.id, 'f', rec.full) : blobURL(rec.id, 't', rec.thumb || rec.full)) + '")';
+  el.style.backgroundSize = (100 / win.w) + '% ' + (100 / win.h) + '%';
+  el.style.backgroundPosition = (win.w >= 0.9999 ? 0 : win.x / (1 - win.w) * 100) + '% ' + (win.h >= 0.9999 ? 0 : win.y / (1 - win.h) * 100) + '%';
+}
+async function igRender() {
+  if (!IG.plan) await igLoad();
+  const p = IG.plan;
+  const sel = $('#ig-plan');
+  sel.innerHTML = '';
+  IG.plans.forEach(x => { const o = document.createElement('option'); o.value = x.id; o.textContent = x.name; sel.appendChild(o); });
+  sel.value = p.id;
+  $('#ig-phone').classList.toggle('dark', p.theme === 'dark');
+  $('#ig-phone').classList.toggle('r11', p.ratio === '11');
+  $$('#ig-ratio button').forEach(b => b.classList.toggle('on', b.dataset.v === (p.ratio || '34')));
+  $$('#ig-theme button').forEach(b => b.classList.toggle('on', b.dataset.v === (p.theme || 'light')));
+  $$('#ig-look button').forEach(b => b.classList.toggle('on', IG.look.has(b.dataset.v)));
+  $('#ig-handle').textContent = p.handle || 'username';
+  $('#ig-name').textContent = p.dname || '名前';
+  $('#ig-name').style.opacity = p.dname ? 1 : .45;
+  $('#ig-bio-t').textContent = p.bio || 'プロフィール文';
+  $('#ig-bio-t').style.opacity = p.bio ? 1 : .45;
+  $('#ig-n-fol').textContent = p.followers || '0';
+  $('#ig-n-fing').textContent = p.following || '0';
+  await igRecs([...p.tiles.map(t => t.imageId), p.avatar]);
+  const av = p.avatar && IG.recs.get(p.avatar);
+  $('#ig-avatar').style.backgroundImage = av ? 'url("' + blobURL(av.id, 't', av.thumb || av.full) + '")' : '';
+  igRenderGrid();
+}
+function igRenderGrid() {
+  const g = $('#ig-grid'), p = IG.plan, A = igAspect();
+  g.innerHTML = '';
+  g.classList.toggle('blur', IG.look.has('blur'));
+  g.classList.toggle('gray', IG.look.has('gray'));
+  const frag = document.createDocumentFragment();
+  p.tiles.forEach((t, i) => frag.appendChild(igTileEl(t, i, A)));
+  g.appendChild(frag);
+  $('#ig-empty').hidden = p.tiles.length > 0;
+  $('#ig-n-posts').textContent = p.tiles.length;
+}
+function igTileEl(t, i, A) {
+  const el = document.createElement('div');
+  el.className = 'ig-tile';
+  el.dataset.i = i;
+  const rec = IG.recs.get(t.imageId);
+  const pic = inspEl('i', 'ig-pic');
+  el.appendChild(pic);
+  if (rec) igPaint(pic, rec, igWindow(rec, t, A));
+  else el.appendChild(inspEl('i', 'ig-miss', '写真が見つかりません'));
+  if (!t.posted) el.appendChild(inspEl('i', 'ig-dot', '予定'));
+  if (rec && isVideoRec(rec)) el.insertAdjacentHTML('beforeend', '<svg class="ig-reel" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M10 8.5l5 3.5-5 3.5z"/></svg>');
+  return el;
+}
+function igRefreshTile(t) {
+  const i = IG.plan.tiles.indexOf(t), el = $('#ig-grid').children[i], rec = IG.recs.get(t.imageId);
+  if (el && rec) igPaint(el.querySelector('.ig-pic'), rec, igWindow(rec, t, igAspect()));
+}
+/* ホームの3つ目のタブ */
+function showInsta(on) {
+  IG.on = !!on;
+  if (IG.on) { STOCK.on = false; STOCK.sel.clear(); }
+  $('#seg-boards').classList.toggle('on', !STOCK.on && !IG.on);
+  $('#seg-stock').classList.toggle('on', STOCK.on);
+  $('#seg-insta').classList.toggle('on', IG.on);
+  $('#home-boards').hidden = STOCK.on || IG.on;
+  $('#stock-view').hidden = !STOCK.on;
+  $('#insta-view').hidden = !IG.on;
+  syncStockDock();
+  if (IG.on) igRender();
+}
+$('#seg-insta').onclick = () => showInsta(true);
+/* ほかの画面から写真を入れる（ストックで選んだもの・ボードの写真）。左上から、選んだ順に */
+async function igAddImages(ids, newPlanName) {
+  ids = ids.filter(Boolean);
+  if (!ids.length) return toast('写真を選んでください');
+  if (!IG.plan) await igLoad();
+  if (newPlanName) {
+    const p = igNewPlan(newPlanName);
+    IG.plans.unshift(p); igUse(p);
+  }
+  IG.plan.tiles.unshift(...ids.map(id => ({ id: uid(), imageId: id, posted: false })));
+  igSave();
+  if (S.view === 'board') goHome();
+  closeSheets();
+  showInsta(true);
+  $('#home-scroll').scrollTop = 0;
+  toast(ids.length + ' 枚を「' + IG.plan.name + '」の左上に並べました', 2400);
+}
+$('#stock-insta').onclick = () => igAddImages([...STOCK.sel]);
+
+/* ---- ドラッグで並べ替え（マウスは少し動かしたら・携帯は少し長押ししてから） ---- */
+(() => {
+  const grid = $('#ig-grid');
+  let st = null, scrollT = 0;
+  const nearest = (x, y) => {
+    let best = -1, bd = 1e9;
+    [...grid.children].forEach((el, i) => {
+      const r = el.getBoundingClientRect();
+      const d = Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2));
+      if (d < bd) { bd = d; best = i; }
+    });
+    return best;
+  };
+  function begin() {
+    st.started = true;
+    const r = st.el.getBoundingClientRect(), pic = st.el.querySelector('.ig-pic');
+    const gh = document.createElement('div');
+    gh.className = 'ig-ghost';
+    gh.style.width = r.width + 'px'; gh.style.height = r.height + 'px';
+    if (pic) ['backgroundImage', 'backgroundSize', 'backgroundPosition'].forEach(k => { gh.style[k] = pic.style[k]; });
+    document.body.appendChild(gh);
+    st.ghost = gh;
+    st.el.classList.add('dragging');
+    if (st.touch && navigator.vibrate) { try { navigator.vibrate(12); } catch (e) { } }
+    move();
+    // 上下の端に近づいたら、ホームの画面を送る
+    scrollT = setInterval(() => {
+      if (!st) return;
+      const box = $('#home-scroll'), r2 = box.getBoundingClientRect();
+      const v = st.y < r2.top + 70 ? -14 : st.y > r2.bottom - 70 ? 14 : 0;
+      if (v) { box.scrollTop += v; move(); }
+    }, 30);
+  }
+  function move() {
+    st.ghost.style.left = st.x + 'px'; st.ghost.style.top = st.y + 'px';
+    const to = nearest(st.x, st.y);
+    if (to < 0 || to === st.i) return;
+    const arr = IG.plan.tiles;
+    const [t] = arr.splice(st.i, 1);
+    arr.splice(to, 0, t);
+    st.i = to;
+    igRenderGrid();
+    st.el = grid.children[to];
+    st.el.classList.add('dragging');
+  }
+  grid.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('.ig-tile');
+    if (!el || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    st = { i: +el.dataset.i, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, id: e.pointerId, touch: e.pointerType !== 'mouse', el, started: false };
+    if (st.touch) st.timer = setTimeout(() => { if (st && !st.started) begin(); }, 300);
+  });
+  addEventListener('pointermove', (e) => {
+    if (!st || e.pointerId !== st.id) return;
+    st.x = e.clientX; st.y = e.clientY;
+    if (!st.started) {
+      const far = Math.hypot(st.x - st.sx, st.y - st.sy);
+      if (st.touch) { if (far > 8) { clearTimeout(st.timer); st = null; } return; }   // 長押しの前に動いた＝スクロール
+      if (far < 5) return;
+      begin();
+      return;
+    }
+    move();
+  });
+  const end = (e) => {
+    if (!st || (e && e.pointerId !== st.id)) return;
+    clearTimeout(st.timer); clearInterval(scrollT);
+    const was = st;
+    st = null;
+    if (was.started) { was.ghost.remove(); igRenderGrid(); igSave(); }
+    else if (e && e.type === 'pointerup') igOpenTile(was.i);      // 押しただけ
+  };
+  addEventListener('pointerup', end);
+  addEventListener('pointercancel', end);
+  // 長押しで動かしているあいだは、画面がスクロールしないように（長押しのメニューも出さない）
+  grid.addEventListener('touchmove', (e) => { if (st && st.started) e.preventDefault(); }, { passive: false });
+  grid.addEventListener('contextmenu', (e) => e.preventDefault());
+})();
+
+/* ---- 1つの投稿 ---- */
+async function igOpenTile(i) {
+  const t = IG.plan.tiles[i];
+  if (!t) return;
+  IG.tile = t;
+  $('#igtile-title').textContent = (i + 1) + ' 番目の投稿';
+  $('#igtile-frame').classList.toggle('r11', IG.plan.ratio === '11');
+  $('#igtile-zoom').value = (t.pos && t.pos.k) || 1;
+  $('#igtile-zoom').disabled = !!t.puzzle;
+  $('#igtile-hint').textContent = t.puzzle ? 'パズルの一部です。位置は、元の写真の真ん中に合わせてあります。'
+    : '写真をドラッグで動かし、下で大きさを変えられます。グリッドでの見え方がそのまま変わります。';
+  $$('#igtile-state button').forEach(b => b.classList.toggle('on', (b.dataset.v === 'posted') === !!t.posted));
+  $('#igtile-cap').value = t.caption || '';
+  const rec = IG.recs.get(t.imageId);
+  $('#igtile-unsplit').hidden = !t.puzzle;
+  $('.ig-split').hidden = !!t.puzzle || !rec || isVideoRec(rec);
+  igTileEditorPaint();
+  openSheet('#sheet-igtile');
+}
+function igTileEditorPaint() {
+  const t = IG.tile, rec = t && IG.recs.get(t.imageId), img = $('#igtile-img');
+  if (!rec) { img.style.backgroundImage = ''; return; }
+  igPaint(img, rec, igWindow(rec, t, igAspect()), true);
+}
+(() => {
+  const f = $('#igtile-frame');
+  let d = null;
+  f.addEventListener('pointerdown', (e) => {
+    const t = IG.tile, rec = t && IG.recs.get(t.imageId);
+    if (!rec || t.puzzle) return;
+    try { f.setPointerCapture(e.pointerId); } catch (err) { }
+    const win = igWindow(rec, t, igAspect());
+    d = { x: e.clientX, y: e.clientY, cx: win.x + win.w / 2, cy: win.y + win.h / 2, w: win.w, h: win.h, fw: f.clientWidth, fh: f.clientHeight };
+  });
+  f.addEventListener('pointermove', (e) => {
+    if (!d) return;
+    const t = IG.tile;
+    const cx = d.cx - (e.clientX - d.x) / d.fw * d.w, cy = d.cy - (e.clientY - d.y) / d.fh * d.h;
+    t.pos = { cx: clamp(cx, d.w / 2, 1 - d.w / 2), cy: clamp(cy, d.h / 2, 1 - d.h / 2), k: (t.pos && t.pos.k) || 1 };
+    igTileEditorPaint(); igRefreshTile(t);
+  });
+  const up = () => { if (d) { d = null; igSave(); } };
+  f.addEventListener('pointerup', up);
+  f.addEventListener('pointercancel', up);
+})();
+$('#igtile-zoom').oninput = () => {
+  const t = IG.tile;
+  if (!t || t.puzzle) return;
+  const p = t.pos || { cx: .5, cy: .5 };
+  t.pos = { cx: p.cx, cy: p.cy, k: +$('#igtile-zoom').value };
+  igTileEditorPaint(); igRefreshTile(t); igSave();
+};
+$('#igtile-reset').onclick = () => { const t = IG.tile; if (!t || t.puzzle) return; delete t.pos; $('#igtile-zoom').value = 1; igTileEditorPaint(); igRefreshTile(t); igSave(); };
+$$('#igtile-state button').forEach(b => b.onclick = () => {
+  const t = IG.tile; if (!t) return;
+  t.posted = b.dataset.v === 'posted';
+  if (!t.posted) delete t.posted;
+  $$('#igtile-state button').forEach(x => x.classList.toggle('on', x === b));
+  igRenderGrid(); igSave();
+});
+$('#igtile-cap').addEventListener('input', () => { const t = IG.tile; if (!t) return; t.caption = $('#igtile-cap').value; if (!t.caption) delete t.caption; igSave(); });
+const igGroupOf = (t) => t.puzzle ? IG.plan.tiles.filter(x => x.puzzle && x.puzzle.g === t.puzzle.g) : [t];
+$('#igtile-first').onclick = () => {
+  const t = IG.tile; if (!t) return;
+  const grp = igGroupOf(t);                     // パズルはまとめて動かす
+  IG.plan.tiles = IG.plan.tiles.filter(x => !grp.includes(x));
+  IG.plan.tiles.unshift(...grp);
+  closeSheets(); igRenderGrid(); igSave();
+  toast('左上（次に投稿する場所）に動かしました');
+};
+$('#igtile-avatar').onclick = () => { const t = IG.tile; if (!t) return; IG.plan.avatar = t.imageId; closeSheets(); igSave(); igRender(); toast('アイコンにしました'); };
+$$('.ig-split-btns .chip').forEach(b => b.onclick = () => {
+  const t = IG.tile; if (!t || t.puzzle) return;
+  const n = +b.dataset.n, rows = n / 3, g = uid();
+  const arr = IG.plan.tiles, i = arr.indexOf(t);
+  arr.splice(i, 1);
+  const start = Math.min(i - (i % 3), arr.length);   // 段のはじめにそろえる（ずれると、つながって見えない）
+  const pieces = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < 3; c++) pieces.push({ id: uid(), imageId: t.imageId, puzzle: { g, cols: 3, rows, r, c }, ...(t.posted ? { posted: true } : {}) });
+  arr.splice(start, 0, ...pieces);
+  closeSheets(); igRenderGrid(); igSave();
+  toast(n + ' 枚に分けて並べました。間に別の投稿が入ると、ずれて見えます', 3200);
+});
+$('#igtile-unsplit').onclick = () => {
+  const t = IG.tile; if (!t || !t.puzzle) return;
+  const grp = igGroupOf(t), arr = IG.plan.tiles, at = arr.indexOf(grp[0]);
+  IG.plan.tiles = arr.filter(x => !grp.includes(x));
+  IG.plan.tiles.splice(at, 0, { id: uid(), imageId: t.imageId, ...(t.posted ? { posted: true } : {}) });
+  closeSheets(); igRenderGrid(); igSave();
+};
+$('#igtile-remove').onclick = () => {
+  const t = IG.tile; if (!t) return;
+  IG.plan.tiles = IG.plan.tiles.filter(x => x !== t);
+  closeSheets(); igRenderGrid(); igSave();
+  toast('この案からはずしました（写真はストックに残っています）');
+};
+$('#igtile-close').onclick = closeSheets;
+
+/* ---- 案・見え方・プロフィール ---- */
+$('#ig-plan').onchange = () => { const p = IG.plans.find(x => x.id === $('#ig-plan').value); if (p) { igUse(p); igRender(); } };
+$('#ig-plan-new').onclick = async () => {
+  const name = await ask('新しい案の名前', 'インスタの案 ' + (IG.plans.length + 1));
+  if (name === null) return;
+  const cur = IG.plan, p = igNewPlan(name || 'インスタの案');
+  // プロフィール（名前・アイコンなど）は、いまの案から引きつぐ
+  if (cur) ['handle', 'dname', 'bio', 'avatar', 'followers', 'following', 'ratio', 'theme'].forEach(k => { p[k] = cur[k]; });
+  IG.plans.unshift(p); igUse(p); await dbPut('meta', p); igRender();
+};
+$('#ig-plan-edit').onclick = () => { $('#igplan-title').textContent = '「' + IG.plan.name + '」'; openSheet('#sheet-igplan'); };
+$('#igplan-close').onclick = closeSheets;
+$('#igplan-rename').onclick = async () => {
+  closeSheets();
+  const v = await ask('案の名前', IG.plan.name);
+  if (v === null || !v) return;
+  IG.plan.name = v; igSave(); igRender();
+};
+$('#igplan-dup').onclick = async () => {
+  closeSheets();
+  const cur = IG.plan, id = uid();
+  const p = JSON.parse(JSON.stringify(cur));
+  Object.assign(p, { key: 'feed:' + id, id, name: cur.name + ' のコピー', createdAt: nowISO(), updatedAt: nowISO() });
+  p.tiles.forEach(t => { t.id = uid(); });
+  IG.plans.unshift(p); igUse(p); await dbPut('meta', p); igRender();
+  toast('複製しました。並べ方を変えて見比べられます');
+};
+$('#igplan-del').onclick = async () => {
+  closeSheets();
+  const ok = await confirmAsk('「' + IG.plan.name + '」を消します。写真そのものはストックに残ります。');
+  if (!ok) return;
+  await dbDel('meta', IG.plan.key);
+  IG.plans = IG.plans.filter(x => x !== IG.plan);
+  IG.plan = null;
+  if (IG.plans.length) igUse(IG.plans[0]);
+  igRender();
+};
+$$('#ig-ratio button').forEach(b => b.onclick = () => { IG.plan.ratio = b.dataset.v; igSave(); igRender(); });
+$$('#ig-theme button').forEach(b => b.onclick = () => { IG.plan.theme = b.dataset.v; igSave(); igRender(); });
+$$('#ig-look button').forEach(b => b.onclick = () => {
+  const v = b.dataset.v;
+  if (IG.look.has(v)) IG.look.delete(v); else IG.look.add(v);
+  $$('#ig-look button').forEach(x => x.classList.toggle('on', IG.look.has(x.dataset.v)));
+  igRenderGrid();
+});
+const igEdit = async (title, key, multi, num) => {
+  let v = await ask(title, IG.plan[key] || '', multi);
+  if (v === null) return;
+  if (key === 'handle') v = v.replace(/\s+/g, '_');
+  if (num) v = v.replace(/[^\d.,万千KkMm]/g, '');
+  IG.plan[key] = v; igSave(); igRender();
+};
+$('#ig-handle').onclick = () => igEdit('ユーザーネーム', 'handle');
+$('#ig-name').onclick = () => igEdit('名前', 'dname');
+$('#ig-bio-t').onclick = () => igEdit('プロフィール文', 'bio', true);
+$('#ig-n-fol-btn').onclick = () => igEdit('フォロワーの数', 'followers', false, true);
+$('#ig-n-fing-btn').onclick = () => igEdit('フォロー中の数', 'following', false, true);
+$('#ig-avatar').onclick = () => igOpenPicker('avatar');
+
+/* ---- まぜる（「これから投稿」の写真だけ。パズルは動かさない） ---- */
+$('#btn-ig-shuffle').onclick = () => {
+  const arr = IG.plan.tiles;
+  let idx = arr.map((t, i) => (!t.posted && !t.puzzle) ? i : -1).filter(i => i >= 0);
+  const planned = idx.length >= 2;
+  if (!planned) idx = arr.map((t, i) => !t.puzzle ? i : -1).filter(i => i >= 0);
+  if (idx.length < 2) return toast('まぜられる写真がありません');
+  const mixed = shuffled(idx.map(i => arr[i]), (Date.now() % 2147483647) || 1);
+  idx.forEach((i, k) => { arr[i] = mixed[k]; });
+  igRenderGrid(); igSave();
+  toast(planned ? '「これから投稿」の写真をまぜました' : 'まぜました', 1600);
+};
+
+/* ---- 写真を足す（ストックから。◎本命・○候補でしぼれる） ---- */
+const IGP = { sel: [], filter: 'all', q: '', mode: 'add', limit: 240 };
+async function igOpenPicker(mode) {
+  IGP.sel = []; IGP.mode = mode || 'add'; IGP.q = ''; IGP.limit = 240;
+  $('#igpick-q').value = '';
+  if (!STOCK.info.size) await loadStock();
+  igPickRender();
+  openSheet('#sheet-igpick');
+}
+function igPickList() {
+  const words = IGP.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const inPlan = new Set(IG.plan.tiles.map(t => t.imageId));
+  return STOCK.all.filter(r => {
+    if (IGP.filter === 'm1' && r.mark !== 1) return false;
+    if (IGP.filter === 'm2' && r.mark !== 2) return false;
+    if (IGP.filter === 'out' && inPlan.has(r.id)) return false;
+    const inf = STOCK.info.get(r.id);
+    return words.every(w => inf && inf.text.includes(w));
+  });
+}
+function igPickRender() {
+  const fb = $('#igpick-filters');
+  fb.innerHTML = '';
+  [['all', 'すべて'], ['out', 'この案にまだ無い'], ['m1', MARKS[1].s + ' ' + MARKS[1].name], ['m2', MARKS[2].s + ' ' + MARKS[2].name]].forEach(([v, l]) => {
+    const c = inspEl('button', 'chip' + (IGP.filter === v ? ' on' : ''), l);
+    c.onclick = () => { IGP.filter = v; IGP.limit = 240; igPickRender(); };
+    fb.appendChild(c);
+  });
+  const list = igPickList(), g = $('#igpick-grid');
+  g.innerHTML = '';
+  list.slice(0, IGP.limit).forEach(r => {
+    const b = document.createElement('button');
+    b.dataset.id = r.id;
+    b.style.backgroundImage = 'url("' + blobURL(r.id, 't', r.thumb || r.full) + '")';
+    const k = IGP.sel.indexOf(r.id);
+    if (k >= 0) { b.classList.add('on'); b.appendChild(inspEl('b', '', String(k + 1))); }
+    g.appendChild(b);
+  });
+  if (list.length > IGP.limit) {
+    const m = inspEl('button', 'more', 'もっと見る（あと ' + (list.length - IGP.limit) + ' 枚）');
+    m.onclick = () => { IGP.limit += 240; igPickRender(); };
+    g.appendChild(m);
+  }
+  if (!list.length) g.appendChild(inspEl('p', 'more', STOCK.all.length ? '見つかりませんでした' : 'ストックに写真がありません。まず写真を取り込んでください'));
+  const go = $('#igpick-go');
+  go.disabled = !IGP.sel.length;
+  go.textContent = IGP.mode === 'avatar' ? 'アイコンにする' : (IGP.sel.length ? IGP.sel.length + ' 枚を足す' : '足す');
+}
+$('#igpick-grid').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-id]'); if (!b) return;
+  const id = b.dataset.id, k = IGP.sel.indexOf(id);
+  if (IGP.mode === 'avatar') IGP.sel = k >= 0 ? [] : [id];
+  else if (k >= 0) IGP.sel.splice(k, 1); else IGP.sel.push(id);
+  igPickRender();
+});
+let igpQT = 0;
+$('#igpick-q').addEventListener('input', () => { clearTimeout(igpQT); igpQT = setTimeout(() => { IGP.q = $('#igpick-q').value; IGP.limit = 240; igPickRender(); }, 160); });
+$('#igpick-close').onclick = closeSheets;
+$('#igpick-go').onclick = async () => {
+  if (!IGP.sel.length) return;
+  if (IGP.mode === 'avatar') {
+    IG.plan.avatar = IGP.sel[0];
+    closeSheets(); igSave(); await igRender();
+    return toast('アイコンにしました');
+  }
+  closeSheets();
+  await igAddImages(IGP.sel.slice());
+};
+$('#btn-ig-add').onclick = () => igOpenPicker('add');
+
+/* ---- 書き出す ---- */
+$('#btn-ig-export').onclick = () => openSheet('#sheet-igexport');
+$('#igexp-close').onclick = closeSheets;
+const igBmpCache = new Map();
+async function igBitmap(rec, big) {
+  const key = rec.id + (big ? ':f' : ':t');
+  if (igBmpCache.has(key)) return igBmpCache.get(key);
+  const dec = await decodeImage(await realBlob(big ? rec.full : (rec.thumb || rec.full)));
+  if (igBmpCache.size > 60) { for (const [k, v] of igBmpCache) { v.close && v.close(); igBmpCache.delete(k); break; } }
+  igBmpCache.set(key, dec);
+  return dec;
+}
+/* 見え方を1枚の画像に（インスタの画面そっくり。幅1080）。上から順に高さを積んでいく */
+async function igPreviewBlob() {
+  const p = IG.plan, A = igAspect(), W = 1080, pad = 44;
+  const C = p.theme === 'dark' ? { bg: '#000', fg: '#f5f5f5', sub: '#a8a8a8', btn: '#363636', line: '#262626' }
+    : { bg: '#fff', fg: '#000', sub: '#737373', btn: '#efefef', line: '#dbdbdb' };
+  const gap = 4, tw = (W - gap * 2) / 3, th = tw / A;
+  const n = p.tiles.length, rows = Math.max(1, Math.ceil(n / 3));
+  const bio = (p.bio || '').split('\n').slice(0, 4);
+  // 高さの割り付け
+  const L = { handle: 70, avY: 250, avR: 110 };
+  let y = L.avY + L.avR + 50;
+  L.name = p.dname ? y : null; if (p.dname) y += 50;
+  L.bio = y; y += bio.filter(Boolean).length * 46;
+  y += 22; L.btn = y; y += 66 + 34;
+  L.tabs = y; y += 100;
+  const headH = y;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = Math.round(headH + rows * th + (rows - 1) * gap);
+  const g = c.getContext('2d');
+  const font = (w, sz) => w + ' ' + sz + 'px -apple-system,BlinkMacSystemFont,"Hiragino Sans","Segoe UI",sans-serif';
+  g.fillStyle = C.bg; g.fillRect(0, 0, W, c.height);
+  g.textBaseline = 'middle'; g.textAlign = 'left';
+  g.fillStyle = C.fg; g.font = font(700, 48); g.fillText(p.handle || 'username', pad, L.handle);
+  // アイコン
+  const ax = pad + L.avR, ay = L.avY, ar = L.avR;
+  g.save(); g.beginPath(); g.arc(ax, ay, ar, 0, Math.PI * 2); g.closePath();
+  const av = p.avatar && IG.recs.get(p.avatar);
+  if (av) {
+    g.clip();
+    try { const b = await igBitmap(av); const sq = Math.min(b.w, b.h); g.drawImage(b.src, (b.w - sq) / 2, (b.h - sq) / 2, sq, sq, ax - ar, ay - ar, ar * 2, ar * 2); } catch (e) { }
+  } else { g.fillStyle = C.btn; g.fill(); }
+  g.restore();
+  // 投稿・フォロワー・フォロー中
+  const stats = [[n, '投稿'], [p.followers || '0', 'フォロワー'], [p.following || '0', 'フォロー中']];
+  const sx0 = ax + ar + 40, sw = (W - pad - sx0) / 3;
+  g.textAlign = 'center'; g.fillStyle = C.fg;
+  stats.forEach(([v, l], k) => {
+    const cx = sx0 + sw * k + sw / 2;
+    g.font = font(700, 46); g.fillText(String(v), cx, ay - 24);
+    g.font = font(400, 32); g.fillText(l, cx, ay + 30);
+  });
+  g.textAlign = 'left';
+  if (p.dname) { g.font = font(600, 36); g.fillText(p.dname, pad, L.name); }
+  g.font = font(400, 34);
+  let by = L.bio;
+  bio.filter(Boolean).forEach(line => { g.fillText(line, pad, by); by += 46; });
+  // ボタン（プロフィールを編集・シェア）
+  const bw = (W - pad * 2 - 14) / 2;
+  [['プロフィールを編集', pad], ['プロフィールをシェア', pad + bw + 14]].forEach(([l, x]) => {
+    g.fillStyle = C.btn;
+    g.beginPath(); if (g.roundRect) g.roundRect(x, L.btn, bw, 66, 16); else g.rect(x, L.btn, bw, 66); g.fill();
+    g.fillStyle = C.fg; g.font = font(600, 30); g.textAlign = 'center'; g.fillText(l, x + bw / 2, L.btn + 34); g.textAlign = 'left';
+  });
+  // タブ（グリッド・リール・タグ）と下線
+  g.fillStyle = C.line; g.fillRect(0, L.tabs, W, 2);
+  g.lineWidth = 4; g.lineJoin = 'round'; g.lineCap = 'round';
+  [0, 1, 2].forEach(k => {
+    const cx = W / 6 + k * W / 3, cy = L.tabs + 50, r = 22;
+    g.strokeStyle = k === 0 ? C.fg : C.sub;
+    g.beginPath();
+    if (k === 0) { g.rect(cx - r, cy - r, r * 2, r * 2); g.moveTo(cx - r / 3, cy - r); g.lineTo(cx - r / 3, cy + r); g.moveTo(cx + r / 3, cy - r); g.lineTo(cx + r / 3, cy + r); g.moveTo(cx - r, cy - r / 3); g.lineTo(cx + r, cy - r / 3); g.moveTo(cx - r, cy + r / 3); g.lineTo(cx + r, cy + r / 3); }
+    else if (k === 1) { if (g.roundRect) g.roundRect(cx - r, cy - r, r * 2, r * 2, 9); else g.rect(cx - r, cy - r, r * 2, r * 2); g.moveTo(cx - 6, cy - 9); g.lineTo(cx + 10, cy); g.lineTo(cx - 6, cy + 9); g.closePath(); }
+    else { if (g.roundRect) g.roundRect(cx - r, cy - r, r * 2, r * 2, 7); else g.rect(cx - r, cy - r, r * 2, r * 2); g.moveTo(cx + 7, cy - 4); g.arc(cx, cy - 4, 7, 0, Math.PI * 2); g.moveTo(cx - 12, cy + 16); g.quadraticCurveTo(cx, cy + 2, cx + 12, cy + 16); }
+    g.stroke();
+  });
+  g.fillStyle = C.fg; g.fillRect(0, headH - 4, W / 3, 3);
+  // グリッド
+  for (let i = 0; i < n; i++) {
+    const t = p.tiles[i], rec = IG.recs.get(t.imageId);
+    const x = (i % 3) * (tw + gap), ty = headH + Math.floor(i / 3) * (th + gap);
+    if (!rec) { g.fillStyle = C.btn; g.fillRect(x, ty, tw, th); continue; }
+    try {
+      const b = await igBitmap(rec, t.puzzle || (t.pos && t.pos.k > 1.4));
+      const w = igWindow(rec, t, A);
+      g.drawImage(b.src, w.x * b.w, w.y * b.h, w.w * b.w, w.h * b.h, x, ty, tw, th);
+    } catch (e) { g.fillStyle = C.btn; g.fillRect(x, ty, tw, th); }
+  }
+  return canvasToBlob(c, 'image/jpeg', 0.9);
+}
+/* 投稿用の写真：「これから投稿」を、下の方（先に投稿する方）から順に。1080×1440（1:1 の案なら 1080×1080） */
+async function igPostFiles() {
+  const p = IG.plan, A = igAspect();
+  const todo = p.tiles.filter(t => !t.posted);
+  if (!todo.length) { toast('「これから投稿」の写真がありません'); return []; }
+  const ord = todo.slice().reverse();      // 左上が最後に投稿したもの。なので下の方から先に投稿する
+  const W = 1080, H = Math.round(W / A), files = [], notes = [];
+  progOpen('書き出しています');
+  try {
+    for (let k = 0; k < ord.length; k++) {
+      if (progCancelled) break;
+      progSet(k, ord.length, (k + 1) + ' / ' + ord.length + ' 枚目');
+      const t = ord[k], rec = IG.recs.get(t.imageId);
+      if (!rec) continue;
+      const no = String(k + 1).padStart(2, '0');
+      if (isVideoRec(rec)) {
+        const v = await realBlob(rec.video);
+        files.push({ name: no + '_投稿' + (k + 1) + '.' + (N_EXT[v.type] || 'mp4'), blob: v });
+      } else {
+        const dec = await decodeImage(await realBlob(rec.full));
+        const w = igWindow(rec, t, A);
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+        g.drawImage(dec.src, w.x * dec.w, w.y * dec.h, w.w * dec.w, w.h * dec.h, 0, 0, W, H);
+        dec.close && dec.close();
+        files.push({ name: no + '_投稿' + (k + 1) + '.jpg', blob: await canvasToBlob(c, 'image/jpeg', 0.92) });
+      }
+      notes.push(no + '（' + (k === 0 ? 'いちばん先に投稿' : k === ord.length - 1 ? 'いちばん最後に投稿・左上に来る' : (k + 1) + '番目に投稿') + '）\n' + (t.caption || '（キャプションなし）'));
+    }
+  } finally { progClose(); }
+  if (files.length) files.push({ name: '投稿する順とキャプション.txt', blob: new Blob(['「' + p.name + '」 ' + files.length + ' 件。01 から順に投稿すると、案のとおりに並びます。\n\n' + notes.join('\n\n') + '\n'], { type: 'text/plain;charset=utf-8' }) });
+  return files;
+}
+/* できたファイルを渡す（Mac版は保存・携帯は共有・パソコンのブラウザは保存） */
+async function igDeliver(files, zipName) {
+  if (!files.length) return;
+  const size = files.reduce((a, f) => a + f.blob.size, 0);
+  if (NATIVE) {
+    const payload = [];
+    for (const f of files) payload.push({ name: f.name, b64: await blobToB64(f.blob) });
+    const r = await mbCall('saveFiles', { files: payload, x: innerWidth / 2, y: innerHeight - 90 }).catch(e => { toast('保存できませんでした<br>' + e, 4200); return null; });
+    if (r) toast(files.length + ' 個のファイルを保存しました（' + fmtBytes(size) + '）');
+    return;
+  }
+  if (navigator.canShare && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+    const fs = files.map(f => new File([f.blob], f.name, { type: f.blob.type }));
+    if (navigator.canShare({ files: fs })) {
+      try { await navigator.share({ files: fs, title: zipName }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+  }
+  if (files.length > 1) {
+    const zip = await makeZip(await Promise.all(files.map(async f => ({ name: f.name, data: new Uint8Array(await f.blob.arrayBuffer()) }))));
+    saveBlob(zip, safeName(zipName) + '.zip');
+  } else saveBlob(files[0].blob, files[0].name);
+}
+$('#igexp-preview').onclick = async () => {
+  closeSheets();
+  progOpen('画像を作っています');
+  let blob = null;
+  try { blob = await igPreviewBlob(); } catch (e) { toast('作れませんでした<br>' + (e && e.message || e), 4200); } finally { progClose(); }
+  if (blob) await igDeliver([{ name: safeName(IG.plan.name) + '_インスタの見え方.jpg', blob }], IG.plan.name);
+};
+$('#igexp-posts').onclick = async () => {
+  closeSheets();
+  const files = await igPostFiles();
+  if (files.length) await igDeliver(files, IG.plan.name + '_投稿用');
+};
 
 /* ---- 取り込む（どのボードにも載せない） ---- */
 async function importToStock(files) {

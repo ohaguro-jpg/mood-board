@@ -77,6 +77,38 @@
     '（そういう制限がかかっています）。なので、あちら側で一気にまとめてから持ち帰ります。': '(that’s their restriction), so we gather them there and bring them back.',
     'パソコンのChrome': 'Chrome on a computer', 'で行ってください。': '.', 'Chromeで自分のボードを開く': 'Open your board in Chrome',
     '下のコードをコピーして、': 'Copy the code below and paste it into', '右クリック → 検証 → Console': 'right-click → Inspect → Console', 'に貼って Enter': ', then press Enter',
+    // インスタのグリッドで試す（2026-10-27）
+    'インスタ': 'Instagram', 'インスタに上げたらどう並ぶかを試します。写真をドラッグで動かして、全体の色や雰囲気が合うかを見比べられます（インスタには何も送りません）': 'See how your photos would line up on Instagram. Drag them around to check whether the colors and mood work together (nothing is posted to Instagram).',
+    '案': 'Plan', '新しい案': 'New plan', '名前・消す': 'Rename / delete', 'グリッドの形': 'Grid shape', '3:4（いまのインスタ）': '3:4 (Instagram now)',
+    'インスタの画面の色': 'Instagram screen color', '白い画面': 'Light', '黒い画面': 'Dark', '全体の雰囲気を確かめる見方': 'Ways to check the overall mood', 'ぼかして見る': 'Blur',
+    'ユーザーネームを変える': 'Change username', 'アイコンを変える': 'Change profile photo', '投稿': 'posts', 'フォロワー': 'followers', 'フォロー中': 'following',
+    '名前を変える': 'Rename', '名前': 'Name', 'プロフィール文を変える': 'Change bio', 'プロフィール文': 'Bio', 'プロフィールを編集': 'Edit profile', 'プロフィールをシェア': 'Share profile',
+    '下の「写真を足す」から、ストックやボードの写真を入れます。': 'Use “Add photos” below to bring in photos from Stock or a board.', '左上がいちばん新しい投稿です。': 'The top-left is the newest post.',
+    '写真はドラッグで並べ替え（携帯は少し長押ししてから）。押すと、位置を直す・これから投稿／投稿済み・キャプション・分けて並べる（パズル）など。': 'Drag photos to reorder (on a phone, press and hold first). Tap one to reposition it, mark it planned or posted, draft a caption, split it into a puzzle and more.',
+    'グリッドは今のインスタと同じ 3:4 です。「投稿用の写真を書き出す」で、この見え方のまま 1080×1440 で保存できます。': 'The grid is 3:4, like Instagram now. “Export photos for posting” saves them exactly as they look, at 1080×1440.',
+    '写真を足す': 'Add photos', '書き出す': 'Export', '押した順に、左上（いちばん新しい投稿）から並びます。「これから投稿する写真」として入ります。': 'Photos line up from the top-left (newest) in the order you tap them, as planned posts.',
+    'タグ・メモ・ボード名でさがす': 'Search tags, notes, boards', '足す': 'Add', '{n} 枚を足す': 'Add {n}', 'すべて': 'All', 'この案にまだ無い': 'Not in this plan yet',
+    'もっと見る（あと {n} 枚）': 'Show more ({n} left)', '見つかりませんでした': 'Nothing found', 'ストックに写真がありません。まず写真を取り込んでください': 'No photos in Stock yet. Import some first.',
+    'アイコンにする': 'Use as profile photo', 'この投稿': 'This post', '{n} 番目の投稿': 'Post {n}',
+    '写真をドラッグで動かし、下で大きさを変えられます。グリッドでの見え方がそのまま変わります。': 'Drag the photo to move it and use the slider to zoom. The grid updates as you go.',
+    'パズルの一部です。位置は、元の写真の真ん中に合わせてあります。': 'This is part of a puzzle. It’s centered on the original photo.',
+    'これから投稿': 'Planned', '投稿済み': 'Posted', 'キャプションの下書き': 'Caption draft', '投稿するときの文章・ハッシュタグ': 'Text and hashtags for the post',
+    '先頭へ（次に投稿する）': 'Move to the front (post next)', '左上に動かします': 'Moves it to the top-left', 'プロフィールの丸い写真に': 'Make it the round profile photo',
+    '分けて並べる（パズル）': 'Split into a puzzle', '1枚の写真を、つながって見えるように分けます': 'Splits one photo so the pieces join up in the grid',
+    '{n}枚（横{n}列）': '{n} (one row)', '{n}枚（{n}列）': '{n} ({n} rows)', 'パズルをやめる': 'Undo puzzle', '1枚の投稿に戻します': 'Back to a single post',
+    'この案からはずす': 'Remove from this plan', '写真そのものはストックに残ります': 'The photo stays in Stock',
+    'この案': 'This plan', '複製する': 'Duplicate', '並べ方を変えて見比べたいときに': 'To try a different arrangement side by side', 'この案を消す': 'Delete this plan',
+    '見え方を1枚の画像に': 'Save the look as one image', 'プロフィールとグリッドをそのまま。人に見せて意見をもらうときに': 'Profile and grid as they look — for getting opinions',
+    '投稿用の写真を書き出す': 'Export photos for posting', '「これから投稿」の写真を、投稿する順に 1080×1440（3:4）で。キャプションも': 'Planned photos in posting order at 1080×1440 (3:4), with captions',
+    '写真を選んでください': 'Select photos first', '{n} 枚を「{q}」の左上に並べました': 'Placed {n} at the top-left of “{q}”', '左上（次に投稿する場所）に動かしました': 'Moved to the top-left (next to post)',
+    'アイコンにしました': 'Set as profile photo', '{n} 枚に分けて並べました。間に別の投稿が入ると、ずれて見えます': 'Split into {n}. Posting something in between will shift them.',
+    'この案からはずしました（写真はストックに残っています）': 'Removed from this plan (the photo is still in Stock)', '複製しました。並べ方を変えて見比べられます': 'Duplicated — try a different arrangement',
+    '「{q}」を消します。写真そのものはストックに残ります。': 'Delete “{q}”? The photos stay in Stock.', 'まぜられる写真がありません': 'Nothing to shuffle',
+    '「これから投稿」の写真をまぜました': 'Shuffled the planned photos', 'まぜました': 'Shuffled', '「これから投稿」の写真がありません': 'No planned photos',
+    '画像を作っています': 'Making the image…', '作れませんでした': 'Couldn’t make it', '保存できませんでした': 'Couldn’t save', '写真が見つかりません': 'Photo not found',
+    '新しい案の名前': 'Name of the new plan', 'インスタの案 {n}': 'Instagram plan {n}', 'インスタの案': 'Instagram plan', 'ユーザーネーム': 'Username',
+    'フォロワーの数': 'Number of followers', 'フォロー中の数': 'Number following', '案の名前': 'Plan name', 'インスタで試す': 'Try on Instagram',
+    'インスタのグリッドで試す': 'Try on an Instagram grid', 'えらんだ写真を、インスタの案の左上に並べます': 'Places the selected photos at the top-left of your Instagram plan', '予定': 'Plan',
     // アプリとして入れる（2026-10-27）
     'プライバシーポリシー': 'Privacy policy', '（写真や情報は集めません。どこにも送りません）': ' (we collect nothing and send nothing anywhere)',
     'アプリとして入れる': 'Install as an app', 'ホーム画面から全画面で開けます。ネットが無くても使えます': 'Opens full screen from your home screen. Works offline.',
@@ -366,8 +398,12 @@
     if (root.tagName === 'SCRIPT' || root.tagName === 'STYLE' || root.isContentEditable) return;
     applyAttrs(root);
     const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
-      acceptNode: (n) => (n.nodeType === 1 && (n.tagName === 'SCRIPT' || n.tagName === 'STYLE' || n.tagName === 'TEXTAREA' || n.isContentEditable))
-        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+      acceptNode: (n) => {
+        // 打った文字（テキストエリアの中身）は訳さない。ただし薄い案内（placeholder）は訳す（以前は案内まで日本語のままだった）
+        if (n.nodeType === 1 && n.tagName === 'TEXTAREA') { applyAttrs(n); return NodeFilter.FILTER_REJECT; }
+        return (n.nodeType === 1 && (n.tagName === 'SCRIPT' || n.tagName === 'STYLE' || n.isContentEditable))
+          ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      },
     });
     let n;
     while ((n = tw.nextNode())) { if (n.nodeType === 3) applyText(n); else applyAttrs(n); }
