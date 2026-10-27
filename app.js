@@ -3161,6 +3161,32 @@ async function handleLaunchParams() {
   } catch (e) { toast('共有されたものを受け取れませんでした'); }
 }
 
+/* ---- アプリとして入れる（携帯でリンクを開いた人に） ----
+   Android・パソコンの Chrome は「入れる」ボタンから、そのまま入れられる（beforeinstallprompt）。
+   iPhone は Safari の共有ボタン →「ホーム画面に追加」なので、手順のシートを出す。閉じたら、もう出さない */
+let installEvt = null;
+const isStandaloneApp = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOSDevice = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function syncInstallHint() {
+  let dismissed = false;
+  try { dismissed = localStorage.getItem('mb_install_hint') === 'no'; } catch (e) { }
+  $('#install-hint').hidden = dismissed || NATIVE || isStandaloneApp() || !(installEvt || isIOSDevice());
+}
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; syncInstallHint(); });
+addEventListener('appinstalled', () => { installEvt = null; syncInstallHint(); toast('アプリとして入りました。ホーム画面から開けます', 3200); });
+$('#install-go').onclick = async () => {
+  if (installEvt) {
+    const ev = installEvt; installEvt = null;
+    ev.prompt();
+    try { await ev.userChoice; } catch (e) { }
+    return syncInstallHint();
+  }
+  openSheet('#sheet-install');
+};
+$('#install-x').onclick = () => { try { localStorage.setItem('mb_install_hint', 'no'); } catch (e) { } syncInstallHint(); };
+$('#install-close').onclick = closeSheets;
+syncInstallHint();
+
 /* ---- Android の「戻る」 ----
    ホーム画面のアプリ（PWA）では、戻るボタン・戻るジェスチャーで画面の履歴を戻る。何もしないとアプリごと閉じてしまう。
    開いているもの（シート・1枚表示・ボードなど）があるあいだは「戻るための印」を1つ積んでおき、

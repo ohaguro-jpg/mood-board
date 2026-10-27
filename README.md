@@ -68,6 +68,8 @@ https://ohaguro-jpg.github.io/mood-board/
 3. ほかのアプリ（Google フォト・Instagram・Chrome など）の「共有」→「MOOD BOARD」で、写真や動画をストックに送れます
 4. 戻るボタンで、開いているシートや1枚表示を1つずつ閉じます。アイコンを長押しすると「ストック」「新しいボード」へすぐ行けます
 
+プライバシーポリシー：https://ohaguro-jpg.github.io/mood-board/privacy.html （写真や情報は集めません。どこにも送りません）
+
 Mac とスマホの写真のやりとりは、iCloud 写真・Google フォト・Amazon Photos に任せます。
 Mac版の「送る › 写真アプリに入れる」や「クラウド用フォルダに置く」で入れて、スマホ版では「いれる › スマホの写真から」で選びます。
 

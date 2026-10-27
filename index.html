@@ -57,6 +57,12 @@
         <button id="seg-boards" class="on" role="tab">ボード</button>
         <button id="seg-stock" role="tab">ストック</button>
       </div>
+      <div id="install-hint" hidden>
+        <img src="icon-192.png" alt="">
+        <span><b>アプリとして入れる</b><i>ホーム画面から全画面で開けます。ネットが無くても使えます</i></span>
+        <button class="chip" id="install-go">インストール</button>
+        <button id="install-x" aria-label="閉じる" title="閉じる"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
       <div id="home-boards">
         <h2 class="home-title">ボード</h2>
         <p class="home-lead" id="home-lead"></p>
@@ -419,6 +425,17 @@
   </div>
 </div>
 
+<div class="sheet" id="sheet-install" hidden>
+  <div class="sheet-grab"></div>
+  <h2>アプリとして入れる（iPhone）</h2>
+  <ol class="steps">
+    <li>Safari の下にある<b>共有ボタン</b>（四角から上向きの矢印）を押す</li>
+    <li><b>「ホーム画面に追加」</b>を選ぶ（見当たらなければ、下へずらす）</li>
+    <li>右上の<b>「追加」</b>を押す<br><i>ホーム画面に MOOD BOARD が入り、全画面で開けます。写真はこの iPhone の中にだけ保存されます</i></li>
+  </ol>
+  <div class="sheet-actions"><button class="row-btn ghost" id="install-close">とじる</button></div>
+</div>
+
 <div class="sheet tall" id="sheet-pin" hidden>
   <div class="sheet-grab"></div>
   <h2>Pinterestからまとめて</h2>
@@ -590,6 +607,7 @@
   <input type="search" id="help-q" class="fld-input" autocomplete="off">
   <div class="tag-row help-toc" id="help-toc"></div>
   <div id="help-body"></div>
+  <p class="sheet-note help-legal"><a href="https://ohaguro-jpg.github.io/mood-board/privacy.html" target="_blank" rel="noopener">プライバシーポリシー</a>（写真や情報は集めません。どこにも送りません）</p>
   <div class="sheet-actions"><button class="row-btn solid" id="help-close">とじる</button></div>
 </div>
 

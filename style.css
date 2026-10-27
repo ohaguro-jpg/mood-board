@@ -1602,3 +1602,18 @@ body.at-home #app-title{font-size:.78rem;font-weight:700;letter-spacing:.24em}
 #viewer-next{right:10px}
 @media (hover:hover) and (pointer:fine){ .viewer-step{opacity:.55;transition:opacity .15s} .viewer-step:hover{opacity:1} }
 #viewer.eyedrop #viewer-marks,#viewer.eyedrop .viewer-step{display:none}
+
+/* アプリとして入れる（携帯でリンクを開いた人に） */
+#install-hint{display:flex;align-items:center;gap:10px;margin:10px 0 2px;padding:10px 10px 10px 12px;border-radius:14px;
+  background:var(--cell);border:1px solid var(--line);max-width:560px}
+#install-hint[hidden]{display:none}
+#install-hint img{width:36px;height:36px;border-radius:9px;flex:0 0 auto}
+#install-hint span{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+#install-hint b{font-size:.84rem}
+#install-hint i{font-style:normal;font-size:.7rem;color:var(--fg-2)}
+#install-hint .chip{flex:0 0 auto;font-weight:700}
+#install-x{flex:0 0 auto;width:28px;height:28px;display:grid;place-items:center;color:var(--fg-2)}
+#install-x svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+
+.help-legal{margin-top:14px;text-align:center}
+.help-legal a{color:var(--accent,#ff5a36);font-weight:600}

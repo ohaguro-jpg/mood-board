@@ -77,6 +77,15 @@
     '（そういう制限がかかっています）。なので、あちら側で一気にまとめてから持ち帰ります。': '(that’s their restriction), so we gather them there and bring them back.',
     'パソコンのChrome': 'Chrome on a computer', 'で行ってください。': '.', 'Chromeで自分のボードを開く': 'Open your board in Chrome',
     '下のコードをコピーして、': 'Copy the code below and paste it into', '右クリック → 検証 → Console': 'right-click → Inspect → Console', 'に貼って Enter': ', then press Enter',
+    // アプリとして入れる（2026-10-27）
+    'プライバシーポリシー': 'Privacy policy', '（写真や情報は集めません。どこにも送りません）': ' (we collect nothing and send nothing anywhere)',
+    'アプリとして入れる': 'Install as an app', 'ホーム画面から全画面で開けます。ネットが無くても使えます': 'Opens full screen from your home screen. Works offline.',
+    'インストール': 'Install', '閉じる': 'Close', 'アプリとして入れる（iPhone）': 'Install as an app (iPhone)',
+    'Safari の下にある': 'In Safari, tap the', '共有ボタン': 'Share button', '（四角から上向きの矢印）を押す': ' (a square with an arrow pointing up)',
+    '「ホーム画面に追加」': 'Choose “Add to Home Screen”', 'を選ぶ（見当たらなければ、下へずらす）': ' (scroll down if you don’t see it)',
+    '右上の': 'Tap', '「追加」': '“Add”', 'を押す': ' at the top right',
+    'ホーム画面に MOOD BOARD が入り、全画面で開けます。写真はこの iPhone の中にだけ保存されます': 'MOOD BOARD appears on your home screen and opens full screen. Photos are saved only on this iPhone.',
+    'アプリとして入りました。ホーム画面から開けます': 'Installed. Open it from your home screen.',
     // しるし・1枚表示で前後へ・ストックの並べ替え（2026-10-27）
     'ボード：「{q}」': 'Board: “{q}”',
     'しるし': 'Mark', '{n}〜{n}キー・{n}で外す': 'keys {n}–{n} · {n} clears', 'しるし（{n}〜{n}キー・{n}で外す）': 'Mark (keys {n}–{n} · {n} clears)',
