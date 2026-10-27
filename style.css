@@ -1546,3 +1546,59 @@ body.at-home #app-title{font-size:.78rem;font-weight:700;letter-spacing:.24em}
 /* 動画を見ているときは、写真用の道具を出さない */
 #viewer.is-video #viewer-rotate,#viewer.is-video #viewer-crop,#viewer.is-video #viewer-uncrop,#viewer.is-video #viewer-colors,
 #viewer.is-video #viewer-eyedrop,#viewer.is-video #viewer-guide-btn,#viewer.is-video #viewer-info-btn{display:none!important}
+
+/* ==========================================================================
+   しるし（◎ ○ △ ✕）・ストックの並べ替えと絞り込み・1枚表示で前後へ（2026-10-27）
+   ========================================================================== */
+/* しるしの丸。色は --mkc（しるしごと）。盤面では写真の幅に合わせた大きさ（--mks） */
+.mk{position:absolute;top:6px;right:6px;width:var(--mks,26px);height:var(--mks,26px);border-radius:50%;
+  display:grid;place-items:center;font-style:normal;font-weight:800;line-height:1;
+  font-size:calc(var(--mks,26px) * .62);color:#fff;background:var(--mkc,#ff5a36);
+  box-shadow:0 1px 4px rgba(0,0,0,.35),0 0 0 2px rgba(255,255,255,.9);pointer-events:none;z-index:2}
+.item .mk{top:calc(var(--mks,26px) * .25);right:calc(var(--mks,26px) * .25)}
+.scell .mk{left:6px;right:auto;top:6px;--mks:22px}
+.gcell .mk{--mks:24px}
+.cmp-cell .mk{--mks:30px;top:10px;right:10px}
+
+/* ストックの道具の列（並び・形・色・大きさ） */
+#stock-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0 0}
+.st-sort{display:flex;align-items:center;gap:6px;font-size:.76rem;color:var(--fg-2)}
+.st-sort select{font:inherit;font-size:.78rem;color:var(--fg);background:var(--cell);border:1px solid var(--line);
+  border-radius:999px;padding:5px 26px 5px 12px;appearance:none;-webkit-appearance:none;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 8px center;background-size:14px}
+.st-seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--cell)}
+.st-seg button{font-size:.74rem;padding:5px 11px;color:var(--fg-2);border-right:1px solid var(--line)}
+.st-seg button:last-child{border-right:none}
+.st-seg button.on{background:var(--fg);color:var(--bg,#fff)}
+#stock-colors{display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap}
+#stock-colors button{width:20px;height:20px;border-radius:50%;background:var(--c);
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);transition:transform .12s}
+#stock-colors button.on{box-shadow:0 0 0 2px var(--bg,#fff),0 0 0 4px var(--fg);transform:scale(1.08)}
+#stock-grid.size-s{grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:4px}
+#stock-grid.size-l{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+#stock-filters .chip.sim{border-style:dashed}
+
+/* 右のパネルの「しるし」 */
+.mark-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.mark-btn{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 6px;border-radius:12px;
+  border:1px solid var(--line);background:var(--cell);font-size:1.15rem;font-weight:800;line-height:1;color:var(--mkc)}
+.mark-btn span{font-size:.62rem;font-weight:600;color:var(--fg-2)}
+.mark-btn.on{background:var(--mkc);border-color:var(--mkc);color:#fff}
+.mark-btn.on span{color:#fff}
+.stockmore-marks{display:flex;align-items:center;gap:10px;margin:2px 0 8px}
+.stockmore-marks>span{font-size:.78rem;color:var(--fg-2);flex:0 0 auto}
+.stockmore-marks .mark-row{flex:1}
+
+/* 1枚表示：しるしと、前後へ */
+#viewer-marks{position:absolute;left:12px;top:calc(12px + env(safe-area-inset-top));display:flex;gap:6px;z-index:3}
+#viewer-marks button{width:38px;height:38px;border-radius:50%;font-size:1.05rem;font-weight:800;line-height:1;
+  color:var(--mkc);background:rgba(20,20,24,.72);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+#viewer-marks button.on{background:var(--mkc);color:#fff;border-color:transparent}
+.viewer-step{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:64px;border-radius:12px;z-index:3;
+  display:grid;place-items:center;background:rgba(20,20,24,.5);border:1px solid rgba(255,255,255,.12);color:#fff}
+.viewer-step svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#viewer-prev{left:10px}
+#viewer-next{right:10px}
+@media (hover:hover) and (pointer:fine){ .viewer-step{opacity:.55;transition:opacity .15s} .viewer-step:hover{opacity:1} }
+#viewer.eyedrop #viewer-marks,#viewer.eyedrop .viewer-step{display:none}

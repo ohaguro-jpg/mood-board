@@ -1,6 +1,7 @@
 {
+  "id": "./",
   "name": "MOOD BOARD",
-  "short_name": "MOOD",
+  "short_name": "MOOD BOARD",
   "description": "端末の中だけで完結するムードボード。集めた画像は元が消えても残ります。",
   "start_url": "./index.html",
   "scope": "./",
@@ -9,9 +10,30 @@
   "background_color": "#0d0d0f",
   "theme_color": "#0d0d0f",
   "lang": "ja",
+  "categories": ["photo", "productivity", "design"],
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "share_target": {
+    "action": "./share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        { "name": "media", "accept": ["image/*", "video/*", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".mp4", ".mov", ".webm"] }
+      ]
+    }
+  },
+  "shortcuts": [
+    { "name": "ストック", "short_name": "ストック", "description": "取り込んだ写真の全部", "url": "./index.html?open=stock",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "新しいボード", "short_name": "新しいボード", "url": "./index.html?open=new",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ]
 }

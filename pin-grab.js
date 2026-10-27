@@ -13,6 +13,14 @@
      （下の「おすすめ」が無限に続くと、高さが変わり続けて終わらなかった）
    ・「おすすめ」の見出しは、ピンより下にあって、タブやボタンの中ではないものだけを境目にする
    ・最後に「ボードのピン◯件・取れた◯枚（本体◯・セクション◯）」と内訳を出す
+
+   2026-10-27（本人「まだ全部取れない。ほかのアプリを動かすからかな」）
+   ・ほかのアプリやタブに切り替えて Chrome の画面が隠れると、Chrome はページを止め、Pinterest は続きを読まなくなる。
+     それを「最後まで来た」と取り違えて途中で終わっていた → 隠れている間は待ち、画面に戻ったら続きから集める
+   ・集めている間は「触らないでください」の札を出し、ピンを押してほかの画面へ行かないよう、クリックを受け止める
+   ・画面が眠らないようにする（Wake Lock）。タブの題名に進み具合・止まっていること・できたことを出す
+   ・件数に届いていないうちは、粘ってから終える
+   ・途中までの分をこのページ（Pinterest 側）に覚えておき、もう一度実行すると前回の分と合わせる（3日間）
    ========================================================================== */
 (async () => {
   // 動作確認用（Pinterestに似せた偽のページで試すとき）。ふだんは使わない
@@ -21,8 +29,12 @@
     alert('Pinterestのボードを開いた状態で実行してください');
     return;
   }
+  if (window.__mbGrabRunning) { alert('MOOD BOARD：もう集めています。右下の進み具合をご覧ください'); return; }
+  window.__mbGrabRunning = true;
   const MAX_EDGE = 1800, QUALITY = 0.84, PARALLEL = 4;
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const title0 = document.title;
+  const setTitle = (t) => { document.title = t + '｜MOOD BOARD'; };
 
   /* ---------- 進捗表示 ---------- */
   const ui = document.createElement('div');
@@ -44,6 +56,91 @@
   const sub = ui.querySelector('#mbg-sub');
   let stopped = false;
   ui.querySelector('#mbg-stop').onclick = () => { stopped = true; msg.textContent = '止めています…'; };
+
+  /* ---------- 「触らないでください」の札と、クリックよけ ----------
+     画面いっぱいの透明な板でクリックとスクロールを受け止める（ピンを押すと別の画面へ移って、集めるのが止まるため）。
+     進み具合の箱は板より上にあるので、「中止」は押せる */
+  const shield = document.createElement('div');
+  shield.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(10,10,14,.08);cursor:wait';
+  shield.innerHTML =
+    '<div id="mbg-sign" style="position:absolute;left:50%;top:18px;transform:translateX(-50%);max-width:min(560px,calc(100vw - 32px));' +
+    'background:#ff5a36;color:#fff;border-radius:14px;padding:14px 20px;box-shadow:0 10px 40px rgba(0,0,0,.35);text-align:center;' +
+    'font:14px/1.55 -apple-system,BlinkMacSystemFont,\'Hiragino Sans\',sans-serif">' +
+    '<div id="mbg-sign-h" style="font-size:18px;font-weight:700;letter-spacing:.04em">✋ 集めています。触らないでください</div>' +
+    '<div id="mbg-sign-s" style="margin-top:4px;opacity:.92">終わるまで、この画面を前に出したままにしてください。<br>' +
+    'ほかのアプリやタブに切り替えると止まります（戻れば続きから集めます）</div></div>';
+  ['wheel', 'touchmove'].forEach(t => shield.addEventListener(t, e => e.preventDefault(), { passive: false }));
+  shield.addEventListener('click', () => { sign.animate([{ transform: 'translateX(-50%) scale(1)' }, { transform: 'translateX(-50%) scale(1.06)' }, { transform: 'translateX(-50%) scale(1)' }], { duration: 260 }); });
+  document.body.insertBefore(shield, ui);
+  const sign = shield.querySelector('#mbg-sign');
+  const signText = (h, s, bg) => { shield.querySelector('#mbg-sign-h').textContent = h; shield.querySelector('#mbg-sign-s').innerHTML = s; sign.style.background = bg || '#ff5a36'; };
+
+  // ページを閉じる・再読み込みしようとしたら、確かめてもらう（集めた分が消えるため）
+  const leaveGuard = (e) => { e.preventDefault(); e.returnValue = ''; };
+  window.addEventListener('beforeunload', leaveGuard);
+
+  // 集め終わり（うまくいっても、いかなくても）：札・クリックよけ・確かめ・眠らない を外す
+  function finish() {
+    shield.remove();
+    window.removeEventListener('beforeunload', leaveGuard);
+    if (wake) { try { wake.release(); } catch (e) { } wake = null; }
+    window.__mbGrabRunning = false;
+  }
+  // とちゅうで思わぬことが起きたとき（下の catch から呼ぶ）。札を外して、ここまでの分は次に合わせられると伝える
+  window.__mbGrabFail = (e) => {
+    finish();
+    msg.textContent = 'とちゅうで止まりました（' + ((e && e.message) || e) + '）';
+    sub.textContent = 'このページのまま、もう一度コードを貼って Enter すると、ここまでの分と合わせて集め直します';
+    const b = ui.querySelector('#mbg-stop');
+    b.textContent = '閉じる'; b.onclick = () => { ui.remove(); document.title = title0; };
+  };
+
+  // 画面が眠ると、隠れたのと同じで止まる。集めている間は眠らないようにする（できる Chrome だけ）
+  let wake = null;
+  async function keepAwake() {
+    try {
+      if (!wake && 'wakeLock' in navigator && document.visibilityState === 'visible') {
+        wake = await navigator.wakeLock.request('screen');
+        wake.addEventListener('release', () => { wake = null; });
+      }
+    } catch (e) { /* できなくても集めるのは続ける */ }
+  }
+  keepAwake();
+
+  /* ---------- 画面が隠れている間は待つ ----------
+     Chrome は隠れたページを止める（Pinterest は続きを読まない・こちらの待ち時間も伸びる）。
+     隠れている間の「増えない」を数えると途中で終わってしまうので、戻るまで待つ */
+  const isHidden = () => document.visibilityState === 'hidden';
+  let pauses = 0, progressTitle = '集めています';
+  async function whileHidden() {
+    if (!isHidden()) return false;
+    pauses++;
+    setTitle('⏸ 止まっています');
+    signText('⏸ 止まっています', 'この画面に戻ったので、続きから集めます。<br>終わるまで、ほかのアプリやタブに切り替えないでください', '#c2410c');
+    await new Promise(r => {
+      const f = () => { if (!isHidden()) { document.removeEventListener('visibilitychange', f); r(); } };
+      document.addEventListener('visibilitychange', f);
+    });
+    await sleep(1500);                    // 戻った直後は、Pinterest がまだ描き直していない
+    keepAwake();
+    setTitle(progressTitle);
+    setTimeout(() => { if (!isHidden()) signText('✋ 集めています。触らないでください', '終わるまで、この画面を前に出したままにしてください。<br>ほかのアプリやタブに切り替えると止まります（戻れば続きから集めます）'); }, 2500);
+    return true;
+  }
+  setTitle(progressTitle);
+
+  /* ---------- 前回の分（同じボードを、3日以内にもう一度実行したとき） ---------- */
+  const SAVE_KEY = 'mbgrab:' + location.pathname + location.search;
+  let prev = null;
+  try { prev = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { prev = null; }
+  if (!prev || !prev.groups || Date.now() - (prev.t || 0) > 3 * 864e5) prev = null;
+  const prevUrls = (name) => { const g = prev && prev.groups.find(x => x.name === name); return g ? g.urls : []; };
+  const saveProgress = (groups) => {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ t: Date.now(), groups: groups.map(g => ({ name: g.name, urls: g.urls })) })); } catch (e) { }
+  };
+  // 同じ写真の大きさ違い（236x・736x・originals）を1つに数えるための名前（URLの最後のファイル名）
+  const picKey = (u) => { try { return new URL(u).pathname.split('/').pop() || u; } catch (e) { return u; } };
+  const mergeUrls = (a, b) => { const seen = new Set(), out = []; for (const u of [...a, ...b]) { const k = picKey(u); if (!seen.has(k)) { seen.add(k); out.push(u); } } return out; };
 
   /* ---------- 見つけ方 ---------- */
   const STOP_WORDS = /他のアイデア|関連(する)?(ピン|アイデア)|おすすめ|さらに表示|More (ideas|like this)|Related|You might also like/i;
@@ -127,7 +224,7 @@
   }
 
   /* ---------- 1つのページから、そのボード（またはセクション）のピンを集める ---------- */
-  async function collect(doc, win, label, declared) {
+  async function collect(doc, win, label, declared, gname) {
     // 始めた瞬間はまだページが短く、どの箱もスクロールしていないことがある。増えなくなったら探し直す
     let scroller = findScroller(doc, win);
     let isRoot = scroller === (doc.scrollingElement || doc.documentElement);
@@ -167,22 +264,28 @@
       });
     };
 
-    let stall = 0, last = -1, rounds = 0;
+    let stall = 0, last = -1, rounds = 0, savedAt = 0;
     while (!stopped) {
+      if (await whileHidden()) { stall = 0; refind(); }                        // 隠れていた間の「増えない」は数えない
       grab();
-      sub.textContent = label + '：' + urls.size + ' 枚みつかりました' + (declared ? '（ボードのピン ' + declared + ' 件）' : '');
+      // 途中で閉じてしまっても、もう一度実行したときに合わせられるよう、ときどき覚えておく
+      if (gname != null && urls.size - savedAt >= 40) { savedAt = urls.size; saveProgress([...groups, { name: gname, urls: mergeUrls([...urls], prevUrls(gname)) }]); }
+      sub.textContent = label + '：' + urls.size + ' 枚みつかりました' + (declared ? '（ボードのピン ' + declared + ' 件）' : '') + (prev ? '・前回の分と合わせます' : '');
+      progressTitle = '集めています ' + urls.size + (declared ? ' / ' + declared : '');
+      setTitle(progressTitle);
       if (declared && urls.size >= declared) break;                              // 件数に届いた
       if (stopY != null && top() + viewH() > stopY + viewH()) break;            // おすすめの中に入った
-      if (urls.size > last) { last = urls.size; stall = 0; } else stall++;
-      if (stall === 2 || stall === 5) refind();
+      if (urls.size > last) { last = urls.size; stall = 0; } else if (!isHidden()) stall++;
+      if (stall === 2 || stall === 5 || stall === 12) refind();
+      const patient = declared && urls.size < declared ? 2 : 1;                 // 件数に届いていないうちは粘る
       if (atBottom()) {
-        if (stall >= 6) break;                                                   // 下まで来て、もう増えない
-        scrollTo(Math.max(0, top() - viewH() * 0.5));                            // 少し戻して、読み込みを促す
+        if (stall >= 6 * patient) break;                                         // 下まで来て、もう増えない
+        scrollTo(Math.max(0, top() - viewH() * (stall > 6 ? 1.5 : 0.5)));       // 少し戻して、読み込みを促す
         await sleep(500);
         scrollTo(scroller.scrollHeight);
         await sleep(1400);
       } else {
-        if (stall >= 25) break;                                                  // 下へ進んでも増えない（無限のおすすめ等）
+        if (stall >= 25 * patient) break;                                        // 下へ進んでも増えない（無限のおすすめ等）
         scrollTo(top() + viewH() * 0.8);
         await sleep(850);
       }
@@ -193,7 +296,7 @@
   }
 
   /* ---------- セクションは、見えない枠の中で1つずつ開いて集める ---------- */
-  async function collectInFrame(url, label, expected) {
+  async function collectInFrame(url, label, expected, gname) {
     const f = document.createElement('iframe');
     // sandbox: 枠の中から、この画面ごと別のページへ移動させない（集めた分が消えないように）
     f.setAttribute('sandbox', 'allow-scripts allow-same-origin');
@@ -207,7 +310,7 @@
       await sleep(500);
     }
     let list = [];
-    try { list = await collect(f.contentDocument, f.contentWindow, label, expected || 0); } catch (e) { console.warn('MOOD BOARD:', label, e); }
+    try { list = await collect(f.contentDocument, f.contentWindow, label, expected || 0, gname); } catch (e) { console.warn('MOOD BOARD:', label, e); }
     f.remove();
     return list;
   }
@@ -223,23 +326,26 @@
   const mainExpected = !sections.length ? declared
     : (secKnown ? Math.max(0, declared - sections.reduce((a, x) => a + x.count, 0)) : 0);
   const groups = [];
+  if (prev) sub.textContent = '前回の ' + prev.groups.reduce((a, g) => a + g.urls.length, 0) + ' 枚と合わせて集めます';
   if (!(secKnown && mainExpected === 0)) {               // 全部セクションに入っているボードは本体を見ない
-    const mainList = await collect(document, window, sections.length ? 'ボード本体' : 'ボード', mainExpected);
+    const mainList = mergeUrls(await collect(document, window, sections.length ? 'ボード本体' : 'ボード', mainExpected, ''), prevUrls(''));
     groups.push({ name: '', urls: mainExpected ? mainList.slice(0, mainExpected) : mainList, expected: mainExpected });
+    saveProgress(groups);
   }
   for (let i = 0; i < sections.length && !stopped; i++) {
     msg.textContent = 'セクションを開いています（' + (i + 1) + ' / ' + sections.length + '）';
     const x = sections[i];
-    const l = await collectInFrame(x.url, 'セクション「' + x.name + '」', x.count);
+    const l = mergeUrls(await collectInFrame(x.url, 'セクション「' + x.name + '」', x.count, x.name), prevUrls(x.name));
     groups.push({ name: x.name, urls: x.count ? l.slice(0, x.count) : l, expected: x.count });
+    saveProgress(groups);
   }
 
-  // 同じ写真は1回だけ。並びはボード → セクションの順
+  // 同じ写真は1回だけ（大きさ違いも1つ）。並びはボード → セクションの順
   const seen = new Set(), list = [];
-  for (const g of groups) for (const u of g.urls) if (!seen.has(u)) { seen.add(u); list.push({ url: u, section: g.name }); }
+  for (const g of groups) for (const u of g.urls) { const k = picKey(u); if (!seen.has(k)) { seen.add(k); list.push({ url: u, section: g.name }); } }
   let trimmed = 0;
   if (!sections.length && declared && list.length > declared) { trimmed = list.length - declared; list.length = declared; }
-  if (!list.length) { msg.textContent = '写真が見つかりませんでした'; sub.textContent = report(); return; }
+  if (!list.length) { finish(); msg.textContent = '写真が見つかりませんでした'; sub.textContent = report(); return; }
 
   function report() {
     const parts = groups.map(g => (g.name ? '「' + g.name + '」' : 'ボード本体') + ' ' + g.urls.length);
@@ -272,6 +378,7 @@
   let done = 0, failed = 0;
   stopped = false;   // 集める途中で止めた場合も、見つけた分は取りに行く
   msg.textContent = '写真を集めています';
+  progressTitle = '写真を取り込んでいます'; setTitle(progressTitle);
 
   async function worker(queue) {
     while (queue.length && !stopped) {
@@ -287,12 +394,13 @@
       done++;
       bar.style.width = (done / list.length * 100).toFixed(1) + '%';
       sub.textContent = done + ' / ' + list.length + '　（失敗 ' + failed + '）';
+      if (done % 10 === 0) setTitle(progressTitle = '取り込んでいます ' + done + ' / ' + list.length);
     }
   }
   const queue = list.map((_, i) => i).reverse();
   await Promise.all(Array.from({ length: PARALLEL }, () => worker(queue)));
   const ok = got.filter(Boolean);
-  if (!ok.length) { msg.textContent = '1枚も取得できませんでした'; return; }
+  if (!ok.length) { finish(); msg.textContent = '1枚も取得できませんでした'; return; }
 
   /* ---------- 3) MOOD BOARD が読めるZIPに詰める ---------- */
   msg.textContent = 'まとめています';
@@ -371,7 +479,7 @@
       if (sec) it.section = sec;
       items.push(it);
       hs[c] += ih + GAP;
-      if (z % 10 === 9) { sub.textContent = 'まとめています ' + z + ' / ' + ok.length; await sleep(0); }
+      if (z % 10 === 9 && !isHidden()) { sub.textContent = 'まとめています ' + z + ' / ' + ok.length; await sleep(0); }
     }
     yBase += Math.max(...hs) + HEAD;
   }
@@ -399,15 +507,23 @@
   bar.style.width = '100%';
   msg.innerHTML = '<b>' + ok.length + ' 枚 まとめました</b>';
   const short = declared && ok.length < declared ? declared - ok.length : 0;
+  finish();
+  setTitle('✓ できました ' + ok.length + ' 枚');
+  if (!short) { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } }
   sub.innerHTML = mb + ' MB のZIPを保存しました。<br>MOOD BOARD の「ZIPから読み込む」に入れてください。'
     + '<br>' + report()
     + (sections.length ? '<br>セクションは MOOD BOARD の「区分け」になります' : '')
     + (trimmed ? '<br>おすすめと思われる ' + trimmed + ' 枚は除きました' : '')
     + (failed ? '<br>（' + failed + ' 枚は取得できませんでした）' : '')
+    + (pauses ? '<br>途中で画面が隠れて ' + pauses + ' 回止まりましたが、続きから集めました' : '')
     + (short ? '<br><b>ボードの件数より ' + short + ' 枚少ないです。</b>非公開・削除済みのピンや動画のピンは取れません。'
-      + '多すぎる場合は、もう一度実行してみてください' : '');
+      + '<br>このページのまま、もう一度コードを貼って Enter すると、<b>今回の分と合わせて</b>集め直します（3日以内）' : '');
   ui.querySelector('#mbg-stop').textContent = '閉じる';
-  ui.querySelector('#mbg-stop').onclick = () => ui.remove();
+  ui.querySelector('#mbg-stop').onclick = () => { ui.remove(); document.title = title0; };
   console.log('%cMOOD BOARD: ' + ok.length + ' 枚を ' + mb + ' MB のZIPにまとめました（' + report() + '）',
     'font-size:15px;color:#4ad991');
-})();
+})().catch(e => {
+  console.error('MOOD BOARD:', e);
+  if (window.__mbGrabFail) window.__mbGrabFail(e);
+  else window.__mbGrabRunning = false;
+});
