@@ -148,7 +148,7 @@ function nFlush() {
   }
   return NS.chain;
 }
-window.mbFlush = () => nFlush();
+window.mbFlush = async () => { if (typeof igFlush === 'function') await igFlush(); return nFlush(); };   // 閉じる前に、インスタの案の書きかけも
 function blobToB64(blob) {
   return new Promise((res, rej) => {
     const fr = new FileReader();
@@ -1700,7 +1700,9 @@ async function openCompare(ids) {
       const n = document.createElement('div'); n.className = 'cell-note'; n.textContent = it.note;
       cell.appendChild(n);
     }
-    const mb = markBadge(rec); if (mb) cell.appendChild(mb);
+    // しるしは、列の左上に名前つきで（写真は枠の真ん中に置かれるので、写真の角に付けると離れて浮いて見えた）
+    const mk = markOf(rec);
+    if (mk) { const c = inspEl('span', 'cmp-mark', mk.s + ' ' + mk.name); c.style.setProperty('--mkc', mk.c); cell.appendChild(c); }
     attachCellZoom(cell, im);
     stage.appendChild(cell);
   }
@@ -3148,6 +3150,7 @@ async function handleLaunchParams() {
   if (!shared && !open) return;
   history.replaceState(null, '', location.pathname);    // 再読み込みで二度入らないように
   if (open === 'stock') return showStock(true);
+  if (open === 'insta') return showInsta(true);
   if (open === 'new') return newBoard();
   if (shared === '0') return toast('共有されたものを受け取れませんでした');
   if (!('caches' in window)) return;
@@ -7637,13 +7640,24 @@ function igUse(plan) {
   IG.plan = plan;
   try { localStorage.setItem('mb_ig_plan', plan.id); } catch (e) { }
 }
+/* 変えた案は覚えておいて、少しまとめてから全部保存する
+   （以前は最後の1つしか保存しなかったので、案を変えた直後に別の案を変えると、前の変更が消えることがあった） */
 let igSaveT = 0;
+const igDirty = new Set();
 function igSave() {
   if (!IG.plan) return;
   IG.plan.updatedAt = nowISO();
-  const p = IG.plan;
+  igDirty.add(IG.plan);
   clearTimeout(igSaveT);
-  igSaveT = setTimeout(() => dbPut('meta', p).catch(() => toast('保存できませんでした')), 250);
+  igSaveT = setTimeout(igFlush, 250);
+}
+// 携帯で別のアプリへ切り替えたときも、書きかけを保存しておく
+document.addEventListener('visibilitychange', () => { if (document.hidden && igDirty.size) igFlush(); });
+function igFlush() {
+  clearTimeout(igSaveT);
+  const list = [...igDirty];
+  igDirty.clear();
+  return Promise.all(list.map(p => dbPut('meta', p))).catch(() => toast('保存できませんでした'));
 }
 async function igRecs(ids) {
   for (const id of ids) {

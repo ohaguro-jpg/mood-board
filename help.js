@@ -16,7 +16,7 @@ const HELP = {
         ['④ 人に送る', '写真をいくつか選んで「送る」。番号付きの「くらべるシート」（PDF）にして、AirDrop やメールで渡せます。'],
       ]],
       ['画面のみかた', [
-        ['ホーム：ボード｜ストック', '「ボード」はテーマごとの盤面の一覧。「ストック」は取り込んだ写真の全部です。'],
+        ['ホーム：ボード｜ストック｜インスタ', '「ボード」はテーマごとの盤面の一覧。「ストック」は取り込んだ写真の全部。「インスタ」は、インスタに上げたらどう並ぶかを試す画面です。'],
         ['下のドック', 'いれる（写真などを入れる）・さがす（メモやタグで探す）・えらぶ（何枚かまとめて選ぶ）・ならべる（並べ直す）・道具（描く・整える・見る）。'],
         ['右のパネル', '写真を押すと右に出ます。ひとこと・タグ・大きさ・不透明度・反転などを、その場で変えられます。✕ か Esc で閉じます。'],
         ['右上のボタン', '表示の切り替え（グリッド）・使い方（？）・設定（歯車）・メニュー（≡）。盤面の右上には倍率（押すと全体を表示）と、このボードの色。'],
@@ -135,7 +135,7 @@ const HELP = {
         ['④ Send to someone', 'Select a few photos and press “Send” to make a numbered comparison sheet (PDF) and share it by AirDrop or email.'],
       ]],
       ['The screen', [
-        ['Home: Boards | Stock', '“Boards” lists your boards by theme. “Stock” shows every photo you’ve imported.'],
+        ['Home: Boards | Stock | Instagram', '“Boards” lists your boards by theme. “Stock” shows every photo you’ve imported. “Instagram” lets you try how photos would line up on Instagram.'],
         ['Bottom bar', 'Add (photos and more) · Find (by note or tag) · Select (several at once) · Arrange (tidy up) · Tools (draw, adjust, view).'],
         ['Right panel', 'Click a photo and it opens on the right. Change the caption, tags, size, opacity, flip and more right there. Close with ✕ or Esc.'],
         ['Top-right buttons', 'Switch view (grid) · How to use (?) · Settings (gear) · Menu (≡). On the canvas: zoom level (click to fit all) and this board’s colors.'],

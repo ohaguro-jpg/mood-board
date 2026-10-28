@@ -62,7 +62,7 @@
     'スマホの写真から': 'From photos', '写真のファイルから': 'From files', 'まとめて選べます': 'Pick several at once',
     '写真アプリから': 'From the Photos app', 'iPhoneで撮った写真もそのまま（許可は要りません）': 'iPhone photos too (no permission needed)',
     '連続スクショ': 'Screenshot series', 'インスタやサイトを見ながら、⌃⌥S を押すたびに撮って貯める': 'Browse Instagram or any site and press ⌃⌥S to capture each screen',
-    'どのアプリを見ていても ⌃⌥S で撮れる。止めたところを自動で撮る、も': 'Press ⌃⌥S in any app to capture — or let it capture wherever you stop scrolling',
+    'どのアプリを見ていても ⌃⌥S で撮れる。スクロールを止めたところを自動で撮ることも': 'Press ⌃⌥S in any app to capture — or let it capture wherever you stop scrolling',
     'スクショ': 'screenshot',
     '取り込みフォルダを開く': 'Open the inbox folder', 'ここに入れた写真は、自動でストックに入ります': 'Photos put here go into Stock automatically',
     '画像のURLから': 'From image URLs', '何行でも貼り付けOK': 'Paste as many lines as you like',
