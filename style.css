@@ -1713,11 +1713,16 @@ body.at-home #app-title{font-size:.78rem;font-weight:700;letter-spacing:.24em}
   #ig-side .ig-note{display:none}
 }
 @media (min-width:760px){
-  #view-home.ig-mode #home-scroll{display:flex;flex-direction:column;overflow:hidden;padding-bottom:18px}
-  #view-home.ig-mode #home-scroll>.home-seg,#view-home.ig-mode #install-hint{flex:0 0 auto}
-  #view-home.ig-mode #home-scroll>.home-seg{align-self:flex-start}   /* 横いっぱいに伸びて、暗い画面で帯に見えていた */
-  #view-home.ig-mode #insta-view{flex:1;min-height:0;display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr);gap:28px;margin-top:4px}
+  /* 携帯の画面を窓の上から下まで目いっぱい使うため、タブの切り替え（ボード｜ストック｜インスタ）は左の列の上へ。
+     #insta-view の箱は消して（display:contents）、左の列と携帯の画面を #home-scroll の格子に直接並べる */
+  #view-home.ig-mode #home-scroll{display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr);
+    grid-template-rows:auto auto minmax(0,1fr);column-gap:24px;overflow:hidden;padding:12px 14px 10px 22px}
+  #view-home.ig-mode #home-scroll>.home-seg{grid-column:1;grid-row:1;justify-self:start;align-self:start;margin-bottom:8px}
+  #view-home.ig-mode #install-hint{grid-column:1;grid-row:2;max-width:none}
+  #view-home.ig-mode #insta-view{display:contents}
   #view-home.ig-mode #insta-view[hidden]{display:none}
+  #view-home.ig-mode #ig-side{grid-column:1;grid-row:3}
+  #view-home.ig-mode #ig-stage{grid-column:2;grid-row:1/4}
   #ig-side{min-height:0;overflow-y:auto;padding:0 6px 16px 2px}
   #ig-side .home-title{margin-top:0}
   #ig-side .home-lead{font-size:.8rem;line-height:1.6}
@@ -1728,9 +1733,15 @@ body.at-home #app-title{font-size:.78rem;font-weight:700;letter-spacing:.24em}
   #ig-side #ig-bar .st-seg{display:flex}
   #ig-side #ig-bar .st-seg button{flex:1;text-align:center}
   #ig-side .ig-note{text-align:left;margin:10px 0 0}
-  #ig-stage{min-height:0;display:flex;align-items:center;justify-content:center;padding:2px 0 4px}
-  #ig-phone{height:100%;max-height:900px;aspect-ratio:393/852;width:auto;max-width:100%;margin:0;display:flex;flex-direction:column;
+  #ig-stage{min-height:0;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  #ig-phone{height:100%;aspect-ratio:393/852;width:auto;max-width:100%;margin:0;display:flex;flex-direction:column;
     border:11px solid #141416;border-radius:54px;box-shadow:0 0 0 1px #3b3b40,0 26px 60px rgba(0,0,0,.25)}
+  /* 縁なし：携帯の黒い枠と時刻の帯を消して、画面だけを目いっぱいに */
+  #ig-phone.noframe{border:0;border-radius:0;box-shadow:0 0 0 1px var(--line)}
+  #ig-phone.noframe .ig-status{display:none}
+  /* 写真だけ大きく：プロフィールを隠し、グリッドを横に広げる（大きさはつまみで） */
+  #ig-phone.only{aspect-ratio:auto;width:calc(var(--ig-zoom,100) * 1%);max-width:100%;border:0;border-radius:0;box-shadow:none;background:transparent}
+  #ig-phone.only #ig-screen{background:var(--ig-bg)}
   .ig-status{display:flex}
   #ig-screen{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
   #ig-screen::-webkit-scrollbar{display:none}
@@ -1759,3 +1770,17 @@ body.at-home #app-title{font-size:.78rem;font-weight:700;letter-spacing:.24em}
 .ig-batt{width:24px;height:12px;width:6.1cqw;height:3.1cqw}
 #ig-empty .empty-big{font-size:4.2cqw}
 #ig-empty .empty-sub{font-size:3.2cqw}
+
+/* ---- 縁なし・すきまなし・写真だけ（2026-10-28） ---- */
+#ig-phone.noframe{border-radius:0;border-width:0}
+#ig-grid.nogap{gap:0}
+#ig-phone.only .ig-status,#ig-phone.only .ig-top,#ig-phone.only .ig-prof,#ig-phone.only .ig-bio,
+#ig-phone.only .ig-btns,#ig-phone.only .ig-tabs{display:none}
+#ig-phone.only .ig-tile .ig-dot{font-size:11px;padding:1px 7px}
+#ig-phone.only .ig-tile .ig-reel{width:22px;height:22px}
+#ig-view-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#ig-view-row .chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+#ig-side-acts .row-btn{padding-block:9px}
+#ig-zoom-row{display:flex;align-items:center;gap:8px;font-size:.76rem;color:var(--fg-2)}
+#ig-zoom-row input{flex:1}
+@media (max-width:759px){ #ig-zoom-row{display:none!important} }

@@ -118,6 +118,12 @@
             <button class="row-btn" id="ig-side-undo"><svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 0 12h-2"/></svg><span><b>元にもどす</b><i>⌘Z（やり直しは ⇧⌘Z）</i></span></button>
           </div>
           <div id="ig-bar">
+            <div id="ig-view-row">
+              <button class="chip" id="ig-only" title="プロフィールを隠して、グリッドだけを大きく">写真だけ大きく</button>
+              <button class="chip" id="ig-noframe" title="携帯の黒い枠を消して、画面を目いっぱいに">縁なし</button>
+              <button class="chip" id="ig-nogap" title="写真と写真の間の白い線を消す">すきまなし</button>
+            </div>
+            <label id="ig-zoom-row" hidden><span>大きさ</span><input type="range" id="ig-zoom" min="40" max="100" step="1" value="100"></label>
             <label class="st-sort"><span>案</span><select id="ig-plan"></select></label>
             <div class="ig-bar-row"><button class="chip" id="ig-plan-new">新しい案</button><button class="chip" id="ig-plan-edit">名前・消す</button></div>
             <div class="st-seg" id="ig-ratio" title="グリッドの形">

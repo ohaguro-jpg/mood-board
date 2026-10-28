@@ -110,6 +110,9 @@
     'フォロワーの数': 'Number of followers', 'フォロー中の数': 'Number following', '案の名前': 'Plan name', 'インスタで試す': 'Try on Instagram',
     'インスタのグリッドで試す': 'Try on an Instagram grid', 'えらんだ写真を、インスタの案の左上に並べます': 'Places the selected photos at the top-left of your Instagram plan', '予定': 'Plan',
     // アプリとして入れる（2026-10-27）
+    '縁なし': 'No frame', 'すきまなし': 'No gaps', '写真だけ大きく': 'Photos only, bigger',
+    'プロフィールを隠して、グリッドだけを大きく': 'Hide the profile and show just the grid, large', '携帯の黒い枠を消して、画面を目いっぱいに': 'Remove the phone frame so the screen fills the space',
+    '写真と写真の間の白い線を消す': 'Remove the white lines between photos',
     '⌘Z（やり直しは ⇧⌘Z）': '⌘Z (redo ⇧⌘Z)', '元に戻せるものがありません': 'Nothing to undo', '元に戻しました': 'Undone',
     '「写真を足す」から、ストックやボードの写真を入れます。': 'Use “Add photos” to bring in photos from Stock or a board.', '「これから投稿」の写真だけ': 'Only the planned photos', '見え方の画像・投稿用の写真': 'Preview image and photos for posting',
     'プライバシーポリシー': 'Privacy policy', '（写真や情報は集めません。どこにも送りません）': ' (we collect nothing and send nothing anywhere)',

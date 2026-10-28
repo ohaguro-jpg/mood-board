@@ -7706,8 +7706,32 @@ async function igRender() {
   await igRecs([...p.tiles.map(t => t.imageId), p.avatar]);
   const av = p.avatar && IG.recs.get(p.avatar);
   $('#ig-avatar').style.backgroundImage = av ? 'url("' + blobURL(av.id, 't', av.thumb || av.full) + '")' : '';
+  igApplyView();
   igRenderGrid();
 }
+/* 見え方の切り替え（縁・すきま・写真だけ大きく）。人ごとの好みなので、案ではなく設定（SET）に覚える */
+function igApplyView() {
+  const ph = $('#ig-phone');
+  const noframe = SET.igFrame === 'off', nogap = SET.igGap === 'off', only = SET.igOnly === 'on';
+  ph.classList.toggle('noframe', noframe);
+  ph.classList.toggle('only', only);
+  ph.style.setProperty('--ig-zoom', SET.igZoom || 100);
+  $('#ig-grid').classList.toggle('nogap', nogap);
+  $('#ig-noframe').classList.toggle('on', noframe);
+  $('#ig-nogap').classList.toggle('on', nogap);
+  $('#ig-only').classList.toggle('on', only);
+  $('#ig-zoom-row').hidden = !only;
+  $('#ig-zoom').value = SET.igZoom || 100;
+}
+function igSetView(k, v) {
+  SET[k] = v;
+  try { localStorage.setItem('mb_settings', JSON.stringify(SET)); } catch (e) { }
+  igApplyView();
+}
+$('#ig-noframe').onclick = () => igSetView('igFrame', SET.igFrame === 'off' ? 'on' : 'off');
+$('#ig-nogap').onclick = () => igSetView('igGap', SET.igGap === 'off' ? 'on' : 'off');
+$('#ig-only').onclick = () => { igSetView('igOnly', SET.igOnly === 'on' ? 'off' : 'on'); $('#ig-screen').scrollTop = 0; };
+$('#ig-zoom').oninput = () => igSetView('igZoom', +$('#ig-zoom').value);
 function igRenderGrid() {
   const g = $('#ig-grid'), p = IG.plan, A = igAspect();
   g.innerHTML = '';
@@ -8167,7 +8191,7 @@ async function igPreviewBlob() {
   const p = IG.plan, A = igAspect(), W = 1080, pad = 44;
   const C = p.theme === 'dark' ? { bg: '#000', fg: '#f5f5f5', sub: '#a8a8a8', btn: '#363636', line: '#262626' }
     : { bg: '#fff', fg: '#000', sub: '#737373', btn: '#efefef', line: '#dbdbdb' };
-  const gap = 4, tw = (W - gap * 2) / 3, th = tw / A;
+  const gap = SET.igGap === 'off' ? 0 : 4, tw = (W - gap * 2) / 3, th = tw / A;   // すきまなしなら、書き出しもすきまなし
   const n = p.tiles.length, rows = Math.max(1, Math.ceil(n / 3));
   const bio = (p.bio || '').split('\n').slice(0, 4);
   // 高さの割り付け
