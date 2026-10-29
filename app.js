@@ -6,14 +6,14 @@
 
 /* ---------- 保存サイズの方針 ----------------------------------------------
    原寸をそのまま抱えると数GBになるので、取り込み時に作り直す。
-   FULL  : 見る用。長辺1800px。ムードボードなら十分すぎる。
-   THUMB : 並べる用。長辺480px。何百枚並べても軽い。
-   元がこれより小さい画像は触らずそのまま保存する。
+   FULL  : 見る用。長辺2560px（2026-10-30 まで1800px。Retina の画面いっぱいや、寄せて見ると粗かった）。
+   THUMB : 並べる用。長辺480px。何百枚並べても軽い（寄せて見るときは FULL に差し替える：updateHires）。
+   元がこれより小さい画像は触らずそのまま保存する（作り直すと、そのたびに少し粗くなるため）。
 --------------------------------------------------------------------------- */
-const FULL_EDGE = 1800;
+const FULL_EDGE = 2560;
 const THUMB_EDGE = 480;
-const FULL_Q = 0.84;
-const THUMB_Q = 0.72;
+const FULL_Q = 0.9;
+const THUMB_Q = 0.8;
 
 /* ========================== Mac版かどうか =============================== */
 /* Mac版（mac/MoodBoard.swift）の中で動いているときは、写真とボードを
@@ -370,8 +370,8 @@ async function processImage(blob) {
 
   // 大きい方を一度だけ描き、サムネはその結果から作る（元の巨大画像を二度描かない）
   const fullCanvas = drawCanvas(dec.src, w, h, FULL_EDGE);
-  const full = (Math.max(w, h) <= FULL_EDGE && blob.size < 900 * 1024)
-    ? blob                                   // 十分小さいので触らない
+  const full = (Math.max(w, h) <= FULL_EDGE && blob.size < 2.5 * 1024 * 1024 && /^image\/(jpeg|png|webp|gif)$/.test(blob.type))
+    ? blob                                   // 十分小さいので触らない（作り直すと粗くなる）
     : await canvasToBlob(fullCanvas, type, FULL_Q);
   const thumbCanvas = drawCanvas(fullCanvas, fullCanvas.width, fullCanvas.height, THUMB_EDGE);
   const thumb = await canvasToBlob(thumbCanvas, type, THUMB_Q);
@@ -933,8 +933,8 @@ function applyPhotoLook(el, it) {
   el.classList.toggle('locked', !!it.locked);
   const old = el.querySelector(':scope > .ref-badge'); if (old) old.remove();
   const rb = refBadge(it); if (rb) el.appendChild(rb);
-  // しるし（◎○△✕）。大きさは写真の幅に合わせる（引いて見ても点として見える）
-  const om = el.querySelector(':scope > .mk'); if (om) om.remove();
+  // しるし（◎○△✕・自分で足したもの）。大きさは写真の幅に合わせる（引いて見ても点として見える）
+  const om = el.querySelector(':scope > .mks'); if (om) om.remove();
   if (it.imageId) {
     const mb = markBadge(S.imgs.get(it.imageId));
     if (mb) { mb.style.setProperty('--mks', Math.round(clamp(it.w * 0.13, 24, 56)) + 'px'); el.appendChild(mb); }
@@ -975,7 +975,7 @@ function makeItemEl(it) {
   if (it.type === 'text') {
     const t = document.createElement('div');
     t.className = 'note-body fx';
-    t.textContent = it.text || '';
+    fillRich(t, it);
     el.appendChild(t);
     const cc = cardColors(it);
     if (cc) { el.style.setProperty('--card-bg', cc.bg); el.style.setProperty('--card-fg', cc.fg); }
@@ -1087,6 +1087,8 @@ function applyCam() {
     $('#zoom-val').textContent = Math.round(S.cam.k * 100);
     positionHandle();
     scalePickBadges();
+    scheduleHires();
+    if (typeof AREA !== 'undefined' && AREA.on) syncArea();
   });
 }
 
@@ -1214,12 +1216,12 @@ function itemFromEvent(e) {
 /* --- そろう位置に吸い付かせる ---
    隣の左/中央/右・上/中央/下に近づいたら、そこへ寄せて線を出す。
    手で置いてもボードが散らからない。 */
-function snapPosition(it, nx, ny) {
+function snapPosition(it, nx, ny, skip) {
   const tol = 7 / S.cam.k;                    // 画面上で7pxぶん
   const mine = { v: [nx, nx + it.w / 2, nx + it.w], h: [ny, ny + it.h / 2, ny + it.h] };
   let bv = null, bh = null;
   for (const o of S.items) {
-    if (o.id === it.id) continue;
+    if (o.id === it.id || (skip && skip.has(o.id))) continue;     // 一緒に動いているものには吸い付かない
     const ov = [o.x, o.x + o.w / 2, o.x + o.w];
     const oh = [o.y, o.y + o.h / 2, o.y + o.h];
     for (let a = 0; a < 3; a++) {
@@ -1291,6 +1293,11 @@ wrap.addEventListener('pointerdown', (e) => {
     lastX: e.clientX, lastY: e.clientY, lastT: performance.now(), vx: 0, vy: 0 });
   // 反転して見ている間は見るだけ（左右が逆なので、動かすと指と逆に動いてしまう）
   if (VIEW.mirror) { G = panG(); return; }
+  // 範囲を囲んでいる間は、ドラッグで四角を描く（スペース＋ドラッグ・中ボタンは盤面を動かす）
+  if (typeof AREA !== 'undefined' && AREA.on && e.button !== 1 && !spaceHeld) {
+    G = { mode: 'area', p0: toCanvas(e.clientX, e.clientY), sx: e.clientX, sy: e.clientY, moved: false };
+    return;
+  }
   // 描いている間は、なぞったところが線になる
   if (DRAW.on) {
     const p = toCanvas(e.clientX, e.clientY);
@@ -1318,7 +1325,16 @@ wrap.addEventListener('pointerdown', (e) => {
     const el = itemEl(it.id);
     if (el) canvas.appendChild(el);
   } else if (it && S.picking) {
-    G = { mode: 'tap-pick', it, sx: e.clientX, sy: e.clientY, moved: false };
+    // 選んでいるものをつかんだら、選んだもの全部を一緒に動かす（固定したものは動かさない）。
+    // 選んでいないものは、押せば選び、ドラッグならそれ1つを動かす。動かさずに離せば、選ぶ／外す（以前のまま）
+    const group = it.locked ? [] : (S.picked.includes(it.id) ? pickedItems() : [it]).filter(x => !x.locked);
+    // 吸い付きは、動かすもの全体を囲む四角で見る（1枚ずつだと、外側の写真がそろわない）
+    const box = group.length ? {
+      x: Math.min(...group.map(x => x.x)), y: Math.min(...group.map(x => x.y)),
+      r: Math.max(...group.map(x => x.x + x.w)), b: Math.max(...group.map(x => x.y + x.h)) } : null;
+    G = { mode: 'gdrag', it, group, from: group.map(x => ({ x: x.x, y: x.y })), sx: e.clientX, sy: e.clientY, moved: false,
+          snap: snapshotItems(), skip: new Set(group.map(x => x.id)),
+          box: box && { id: null, x: box.x, y: box.y, w: box.r - box.x, h: box.b - box.y } };
   } else if (e.button === 1 || spaceHeld) {
     // 中ボタン / スペース＋ドラッグ は、いつでも盤面を動かす
     G = { mode: 'pan', cam0: { ...S.cam }, sx: e.clientX, sy: e.clientY, moved: false,
@@ -1385,6 +1401,19 @@ wrap.addEventListener('pointermove', (e) => {
     showGuides(s.vx, s.hy);
     updateItemEl(G.it);
     positionHandle();
+  } else if (G.mode === 'gdrag') {
+    if (!G.moved || !G.group.length) return;
+    const nx = G.box.x + dx / S.cam.k, ny = G.box.y + dy / S.cam.k;
+    // 全体を囲む四角を吸い付かせ、同じだけ全部を動かす
+    const s = (SET.snap === 'on' && !e.altKey) ? snapPosition(G.box, nx, ny, G.skip) : { x: Math.round(nx), y: Math.round(ny), vx: null, hy: null };
+    const ddx = s.x - G.box.x, ddy = s.y - G.box.y;
+    G.group.forEach((x, k) => { x.x = G.from[k].x + ddx; x.y = G.from[k].y + ddy; updateItemEl(x); });
+    showGuides(s.vx, s.hy);
+  } else if (G.mode === 'area') {
+    if (!G.moved) return;
+    const p = toCanvas(e.clientX, e.clientY);
+    AREA.rect = { x1: Math.min(G.p0.x, p.x), y1: Math.min(G.p0.y, p.y), x2: Math.max(G.p0.x, p.x), y2: Math.max(G.p0.y, p.y) };
+    syncArea();
   } else if (G.mode === 'marquee') {
     marqueeTo(G, e);
   } else if (G.mode === 'draw') {
@@ -1443,9 +1472,16 @@ async function endGesture(e) {
       }
     }
   } else if (g.mode === 'resize') {
-    if (g.moved) { pushHistory(g.snap); await dbPut('items', g.it); touchBoard(); }
+    if (g.moved) { pushHistory(g.snap); await dbPut('items', g.it); touchBoard(); scheduleHires(); }
   } else if (g.mode === 'tap-pick') {
     if (!g.moved) togglePick(g.it.id);
+  } else if (g.mode === 'gdrag') {
+    if (!g.moved) togglePick(g.it.id);
+    else if (g.group.length) { pushHistory(g.snap); await dbPutMany('items', g.group); touchBoard(); }
+  } else if (g.mode === 'area') {
+    // 小さすぎる四角（押しただけ・手がすべった）は無かったことに
+    const r = AREA.rect;
+    if (g.moved && r && ((r.x2 - r.x1) * S.cam.k < 12 || (r.y2 - r.y1) * S.cam.k < 12)) { AREA.rect = null; syncArea(); }
   } else if (g.mode === 'marquee') {
     hideMarquee();
     // 自動で選ぶモードに入ったのに何も囲めなかったら、元に戻す（ただのクリックで選択を外す動きと同じ）
@@ -1587,6 +1623,7 @@ function setDock(which) {
   $('#select-dock').hidden = which !== 'select';
   $('#item-dock').hidden = which !== 'item';
   $('#draw-dock').hidden = which !== 'draw';
+  $('#area-dock').hidden = which !== 'area';
   renderInspector();
 }
 
@@ -1701,8 +1738,12 @@ async function openCompare(ids) {
       cell.appendChild(n);
     }
     // しるしは、列の左上に名前つきで（写真は枠の真ん中に置かれるので、写真の角に付けると離れて浮いて見えた）
-    const mk = markOf(rec);
-    if (mk) { const c = inspEl('span', 'cmp-mark', mk.s + ' ' + mk.name); c.style.setProperty('--mkc', mk.c); cell.appendChild(c); }
+    const mks = marksOf(rec);
+    if (mks.length) {
+      const box = inspEl('div', 'cmp-marks');
+      mks.forEach(id => { const d = markDef(id), c = markLabel(inspEl('span', 'cmp-mark'), d); c.style.setProperty('--mkc', d.c); box.appendChild(c); });
+      cell.appendChild(box);
+    }
     attachCellZoom(cell, im);
     stage.appendChild(cell);
   }
@@ -1849,6 +1890,7 @@ async function openViewer(it, opts = {}) {
   if (isVideoRec(rec)) bits.unshift('▶ ' + fmtDur(rec.dur));
   try { if (rec.srcUrl) bits.push(new URL(rec.srcUrl).hostname); } catch (e) { }
   const pos = syncViewerNav();
+  if (it.note) bits.unshift(it.note);      // 1枚ずつ見ていくとき、ひとことも読めるように
   if (pos) bits.unshift(pos);
   $('#viewer-meta').textContent = bits.join('  ·  ');
   syncViewerMarks();
@@ -1985,11 +2027,289 @@ async function addTextToBoard(text, spot) {
   return it;
 }
 
-async function editTextItem(it) {
-  const v = await ask('文字を編集（空にするとゴミ箱へ）', it.text || '', true);
-  if (v === null) return;
-  pushHistory();
-  if (!v) {
+/* ==========================================================================
+   メモ（文字・付箋・吹き出し）を書式つきで書く  2026-10-30
+   Google ドキュメントや Word のように、文字の大きさ・太字・斜体・下線・取り消し線・文字の色・
+   ラインマーカー・箇条書き・番号・中央そろえ を付けられる。
+   ・書いた中身は it.rich（下の決まった書式だけに絞った HTML）。書式の無いメモは今までどおり it.text だけ
+   ・it.text はいつも、書式を外した文字（さがす・古い作りの画面で使う）
+   ・盤面・グリッド・印刷・PDF・画像・プレゼンのどこでも同じ見た目になるように、
+     canvas へは画面と同じ組み方（行の折り返し）を測ってから描く（paintRichText）
+   ・ZIP で他の人から受け取ったものでも安全なように、表示するたびに決まった書式だけに絞り直す（richFrag）
+   ========================================================================== */
+const RICH_TAGS = new Set(['DIV', 'P', 'BR', 'SPAN', 'FONT', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'UL', 'OL', 'LI']);
+const RICH_DROP = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'FRAME', 'OBJECT', 'EMBED', 'IMG', 'SVG', 'MATH', 'VIDEO', 'AUDIO', 'CANVAS', 'TEMPLATE',
+  'LINK', 'META', 'HEAD', 'TITLE', 'NOSCRIPT', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'FORM']);
+const RICH_SZ = { 'x-small': '1', 'small': '2', 'medium': '3', 'large': '4', 'x-large': '5', 'xx-large': '6', 'xxx-large': '7', '-webkit-xxx-large': '7' };
+const richColor = (v) => /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+%?\s*)?\))$/i.test(String(v || '').trim());
+const escHTML = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/* 決まった書式だけに絞った中身（DocumentFragment）を作る。知らない入れ物は外して中の文字だけ残し、危ないものは中身ごと捨てる */
+function richFrag(html) {
+  const src = new DOMParser().parseFromString('<!doctype html><body>' + String(html || ''), 'text/html').body;
+  const out = document.createDocumentFragment();
+  const copy = (from, to) => {
+    for (const n of from.childNodes) {
+      if (n.nodeType === 3) { to.appendChild(document.createTextNode(n.nodeValue)); continue; }
+      if (n.nodeType !== 1) continue;
+      const tag = n.tagName;
+      if (RICH_DROP.has(tag)) continue;
+      if (!RICH_TAGS.has(tag)) { copy(n, to); continue; }
+      const el = document.createElement(tag === 'STRONG' ? 'B' : tag === 'EM' ? 'I' : (tag === 'STRIKE' || tag === 'DEL') ? 'S' : tag);
+      if (tag === 'FONT') {
+        const sz = n.getAttribute('size'); if (/^[1-7]$/.test(sz || '')) el.setAttribute('size', sz);
+        const c = n.getAttribute('color'); if (richColor(c)) el.style.color = c;
+      }
+      const st = n.style;
+      let inner = el;
+      if (st) {
+        if (richColor(st.color)) el.style.color = st.color;
+        const bg = st.backgroundColor;
+        if (bg && (richColor(bg) || bg === 'transparent')) el.style.backgroundColor = bg;
+        if (/^(bold|bolder|[6-9]00)$/.test(st.fontWeight)) el.style.fontWeight = '700';
+        else if (/^(normal|lighter|[1-4]00)$/.test(st.fontWeight)) el.style.fontWeight = '400';
+        if (st.fontStyle === 'italic' || st.fontStyle === 'normal') el.style.fontStyle = st.fontStyle;
+        const td = (st.textDecorationLine || st.textDecoration || '').match(/underline|line-through|none/g);
+        if (td) el.style.textDecoration = td.filter(x => x !== 'none').join(' ') || 'none';
+        if (/^(DIV|P|LI)$/.test(tag) && /^(left|center|right)$/.test(st.textAlign)) el.style.textAlign = st.textAlign;
+        // 大きさを CSS で書いてきたとき（ブラウザによる）は、7段階の大きさに読み替える
+        if (RICH_SZ[st.fontSize]) { inner = document.createElement('font'); inner.setAttribute('size', RICH_SZ[st.fontSize]); el.appendChild(inner); }
+      }
+      if (el.tagName === 'SPAN' && !el.getAttribute('style') && inner === el) { copy(n, to); continue; }   // 何も持たない span は外す
+      to.appendChild(el);
+      copy(n, inner);
+    }
+  };
+  copy(src, out);
+  return out;
+}
+function richHTML(html) { const d = document.createElement('div'); d.appendChild(richFrag(html)); return d.innerHTML; }
+const plainToRich = (text) => String(text || '').split('\n').map(l => '<div>' + (l ? escHTML(l) : '<br>') + '</div>').join('');
+const hasRichFormat = (html) => /<(font|b|i|u|s|ul|ol|li)\b|style="/i.test(html || '');
+/* 書式を外した文字（1段落＝1行）。innerText は空の行（<div><br></div>）で改行を1つ多く数え、開くたびに空行が増えていった */
+function richText(root) {
+  const lines = [];
+  let cur = '', has = false;
+  const walk = (n) => {
+    for (const c of n.childNodes) {
+      if (c.nodeType === 3) { cur += c.nodeValue; has = true; continue; }
+      if (c.nodeType !== 1) continue;
+      if (c.tagName === 'BR') { lines.push(cur); cur = ''; has = false; continue; }
+      const block = /^(DIV|P|LI|UL|OL)$/.test(c.tagName);
+      if (block && has) { lines.push(cur); cur = ''; has = false; }
+      walk(c);
+      if (block && has) { lines.push(cur); cur = ''; has = false; }
+    }
+  };
+  walk(root);
+  if (has) lines.push(cur);
+  return lines.join('\n').replace(/\u00a0/g, ' ').replace(/\n+$/, '');
+}
+/* メモの中身を要素に入れる（盤面・グリッド・印刷） */
+function fillRich(el, it) {
+  if (it.rich) el.replaceChildren(richFrag(it.rich)); else el.textContent = it.text || '';
+  el.classList.add('rich');
+}
+const memoPaper = (it, style) => { const cc = it && cardColors(it); return cc ? cc.bg : ((it ? it.style : style) === 'bubble' ? '#ffffff' : '#f4ecd0'); };
+const memoInk = (it, style) => { const cc = it && cardColors(it); return cc ? cc.fg : ((it ? it.style : style) === 'bubble' ? '#18181b' : '#2a2415'); };
+
+/* メモを canvas に描く。見えない所に盤面と同じ大きさで組んで、1文字ずつの位置を測ってから描く
+   （書式・大きさの違う文字が混ざっても、盤面と同じところで折り返す） */
+function paintRichText(ctx, it, x, y, w, h) {
+  const host = document.createElement('div');
+  host.className = 'item text-item' + (it.style === 'bubble' ? ' bubble' : '');
+  host.style.cssText = 'position:absolute;left:-100000px;top:0;visibility:hidden;transform:none;width:' + it.w + 'px;height:' + it.h + 'px';
+  const cc = cardColors(it);
+  if (cc) { host.style.setProperty('--card-bg', cc.bg); host.style.setProperty('--card-fg', cc.fg); }
+  const body = document.createElement('div'); body.className = 'note-body';
+  fillRich(body, it);
+  host.appendChild(body);
+  document.body.appendChild(host);
+  try {
+    const base = host.getBoundingClientRect();
+    const sx = w / Math.max(1, it.w), sy = h / Math.max(1, it.h);
+    const X = (v) => x + (v - base.left) * sx, Y = (v) => y + (v - base.top) * sy;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    const fontOf = (cs, fs) => cs.fontStyle + ' ' + cs.fontWeight + ' ' + fs + 'px ' + cs.fontFamily;
+    const descOf = (fs) => { const m = ctx.measureText('Mg'); return m.fontBoundingBoxDescent != null ? m.fontBoundingBoxDescent : fs * 0.22; };
+    // 箇条書きの「•」「1.」（文字ではなく飾りなので、ここで描く）
+    body.querySelectorAll('li').forEach(li => {
+      const r = document.createRange(); r.selectNodeContents(li);
+      const first = [...r.getClientRects()].find(q => q.width > 0);
+      if (!first) return;
+      const cs = getComputedStyle(li), fs = parseFloat(cs.fontSize) * sx;
+      const ol = li.parentElement && li.parentElement.tagName === 'OL';
+      const mark = ol ? ([...li.parentElement.children].filter(c => c.tagName === 'LI').indexOf(li) + 1) + '.' : '•';
+      ctx.font = fontOf(cs, fs); ctx.fillStyle = cs.color;
+      ctx.textAlign = 'right';
+      ctx.fillText(mark, X(li.getBoundingClientRect().left) - fs * 0.35, Y(first.bottom) - descOf(fs));
+      ctx.textAlign = 'left';
+    });
+    const tw = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    const rg = document.createRange();
+    let tn;
+    while ((tn = tw.nextNode())) {
+      const el = tn.parentElement, cs = getComputedStyle(el);
+      // マーカー・下線・取り消し線は、外側の入れ物に付いていることもある
+      let hl = null, ul = false, lt = false;
+      for (let a = el; a && a !== body; a = a.parentElement) {
+        const s2 = getComputedStyle(a);
+        const bg = s2.backgroundColor;
+        if (!hl && bg && bg !== 'transparent' && !/rgba\(\s*0,\s*0,\s*0,\s*0\s*\)/.test(bg)) hl = bg;
+        const td = s2.textDecorationLine || s2.webkitTextDecorationLine || '';
+        if (td.includes('underline')) ul = true;
+        if (td.includes('line-through')) lt = true;
+      }
+      const fs = parseFloat(cs.fontSize) * sx;
+      ctx.font = fontOf(cs, fs);
+      const desc = descOf(fs);
+      const draw = (sg) => {
+        const L = X(sg.l), R = X(sg.r), T = Y(sg.t), B = Y(sg.b), base0 = B - desc;
+        if (hl) { ctx.fillStyle = hl; ctx.fillRect(L, T + (B - T) * 0.52, R - L, (B - T) * 0.48); }
+        ctx.fillStyle = cs.color;
+        ctx.fillText(sg.s, L, base0);
+        if (ul || lt) {
+          ctx.fillRect(L, ul ? base0 + fs * 0.1 : base0 - fs * 0.3, R - L, Math.max(1, fs * 0.065));
+          if (ul && lt) ctx.fillRect(L, base0 - fs * 0.3, R - L, Math.max(1, fs * 0.065));
+        }
+      };
+      const text = tn.nodeValue;
+      let sg = null, i = 0;
+      for (const ch of text) {
+        rg.setStart(tn, i); rg.setEnd(tn, i + ch.length); i += ch.length;
+        const rc = [...rg.getClientRects()].find(q => q.width > 0);
+        if (!rc) continue;                     // 折り返しで消えた空白・改行
+        if (sg && Math.abs(rc.top - sg.t) < 1 && rc.left >= sg.r - 1) { sg.s += ch; sg.r = rc.right; }
+        else { if (sg) draw(sg); sg = { s: ch, l: rc.left, r: rc.right, t: rc.top, b: rc.bottom }; }
+      }
+      if (sg) draw(sg);
+    }
+    ctx.restore();
+  } finally { host.remove(); }
+}
+
+/* ---- 書く画面 ---- */
+const MEMO = { it: null, style: 'note', range: null, saveT: 0, pushed: false, pal: '' };
+const MEMO_COLORS = [['', '自動'], ['#6b6b74', 'グレー'], ['#e0453a', '赤'], ['#ee8a2c', 'オレンジ'], ['#b8860b', '黄土'], ['#1f9d63', '緑'], ['#3a74d8', '青'], ['#8a56c9', '紫'], ['#e46aa6', 'ピンク']];
+const MEMO_MARKERS = [['', 'なし'], ['#fff176', '黄'], ['#b9f6ca', '緑'], ['#b3e5fc', '水色'], ['#f8bbd0', 'ピンク'], ['#ffd180', 'オレンジ'], ['#d1c4e9', '紫']];
+const MEMO_AUTO = 'rgb(1, 2, 3)';      // 「自動」の色を付けた目印（付けたあとで外す）
+async function editTextItem(it) { return openMemo(it); }
+function openMemo(it, opts = {}) {
+  closeSheets();
+  MEMO.it = it || null; MEMO.style = it ? (it.style === 'bubble' ? 'bubble' : 'note') : (opts.style || 'note');
+  MEMO.pushed = false; MEMO.range = null; clearTimeout(MEMO.saveT);
+  const body = $('#memo-body');
+  body.innerHTML = it ? (it.rich ? richHTML(it.rich) : plainToRich(it.text)) : '<div><br></div>';
+  body.style.setProperty('--paper', memoPaper(it, MEMO.style));
+  body.style.color = memoInk(it, MEMO.style);
+  $('#memo-title').textContent = MEMO.style === 'bubble' ? '吹き出し' : 'メモ';
+  $('#memo-saved').textContent = '';
+  memoPal('');
+  $('#memo').hidden = false;
+  memoEmptyHint();
+  setTimeout(() => {
+    body.focus();
+    const r = document.createRange(); r.selectNodeContents(body); r.collapse(false);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    memoSyncTools();
+  }, 60);
+}
+function memoEmptyHint() { const b = $('#memo-body'); b.classList.toggle('is-empty', !b.textContent.trim() && !b.querySelector('li')); }
+/* 選んでいる文字を覚えておく（ボタンを押したとき、選んだところに書式を付けるため） */
+document.addEventListener('selectionchange', () => {
+  if ($('#memo').hidden) return;
+  const sel = getSelection();
+  if (!sel.rangeCount) return;
+  const r = sel.getRangeAt(0);
+  if ($('#memo-body').contains(r.commonAncestorContainer)) { MEMO.range = r.cloneRange(); memoSyncTools(); }
+});
+function memoRestore() {
+  const body = $('#memo-body');
+  if (document.activeElement !== body) body.focus();
+  if (MEMO.range) { const sel = getSelection(); sel.removeAllRanges(); sel.addRange(MEMO.range); }
+}
+function memoCmd(cmd, val, css) {
+  memoRestore();
+  try { document.execCommand('styleWithCSS', false, !!css); } catch (e) { }
+  document.execCommand(cmd, false, val);
+  memoChanged();
+  memoSyncTools();
+}
+/* 「自動」の文字の色：目印の色を付けてから、その色だけを外す（ほかの書式は残す） */
+function memoAutoColor() {
+  memoCmd('foreColor', MEMO_AUTO, true);
+  $('#memo-body').querySelectorAll('[style*="color"], font[color]').forEach(el => {
+    if (el.style.color === MEMO_AUTO) { el.style.removeProperty('color'); if (!el.getAttribute('style')) el.removeAttribute('style'); }
+    if (el.getAttribute('color') && /^#?010203$/i.test(el.getAttribute('color'))) el.removeAttribute('color');
+  });
+  memoChanged();
+}
+function memoSyncTools() {
+  const q = (c) => { try { return document.queryCommandState(c); } catch (e) { return false; } };
+  $$('#memo-tools [data-cmd]').forEach(b => { if (b.dataset.state !== 'no') b.classList.toggle('on', q(b.dataset.cmd)); });
+  // 今の文字の大きさ：ふつうの大きさとの比から、いちばん近いボタン（Safari は queryCommandValue で数字を返さないことがある）
+  let sz = '3';
+  const sel = getSelection(), body = $('#memo-body');
+  let n = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+  if (n && n.nodeType === 3) n = n.parentElement;
+  if (n && body.contains(n)) {
+    const ratio = parseFloat(getComputedStyle(n).fontSize) / (parseFloat(getComputedStyle(body).fontSize) || 16);
+    let best = 9;
+    [['2', .8], ['3', 1], ['5', 1.35], ['6', 1.8], ['7', 2.4]].forEach(([k, r]) => { if (Math.abs(ratio - r) < best) { best = Math.abs(ratio - r); sz = k; } });
+  }
+  $$('#memo-tools .mt-size').forEach(b => b.classList.toggle('on', b.dataset.sz === sz));
+}
+function memoPal(kind) {
+  MEMO.pal = kind;
+  const box = $('#memo-pal');
+  box.hidden = !kind;
+  $('#mt-color').classList.toggle('open', kind === 'color');
+  $('#mt-hl').classList.toggle('open', kind === 'hl');
+  if (!kind) return;
+  box.innerHTML = '';
+  box.appendChild(inspEl('b', '', kind === 'color' ? '文字の色' : 'ラインマーカー'));
+  (kind === 'color' ? MEMO_COLORS : MEMO_MARKERS).forEach(([c, name]) => {
+    const d = inspEl('button', 'mp-dot' + (c ? '' : ' none'));
+    if (c) d.style.setProperty('--c', c);
+    d.title = name; d.setAttribute('aria-label', name);
+    d.addEventListener('mousedown', (e) => e.preventDefault());
+    d.onclick = () => {
+      if (kind === 'color') { if (c) memoCmd('foreColor', c, true); else memoAutoColor(); $('#mt-color').style.setProperty('--bar', c || 'currentColor'); }
+      else { memoCmd('hiliteColor', c || 'transparent', true); $('#mt-hl').style.setProperty('--bar', c || 'transparent'); }
+      memoPal('');
+    };
+    box.appendChild(d);
+  });
+}
+function memoChanged() {
+  memoEmptyHint();
+  $('#memo-saved').textContent = '';
+  clearTimeout(MEMO.saveT);
+  MEMO.saveT = setTimeout(() => memoSave(false), 700);
+}
+/* 書いたものを保存する（打っている間も少しずつ。閉じるときは final） */
+async function memoSave(final) {
+  clearTimeout(MEMO.saveT);
+  const body = $('#memo-body');
+  const html = richHTML(body.innerHTML);
+  const text = richText(body);
+  const empty = !text.trim();
+  let it = MEMO.it;
+  if (!it) {
+    if (empty || S.view !== 'board') return;
+    pushHistory(); MEMO.pushed = true;
+    const c = viewCenterCanvas(), bubble = MEMO.style === 'bubble';
+    const w = bubble ? 232 : 260, h = bubble ? 80 : 120;
+    it = { id: uid(), boardId: S.boardId, type: 'text', text: '', x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2), w, h,
+      z: maxZ() + 1, note: '', tags: [], addedAt: nowISO() };
+    if (bubble) { it.style = 'bubble'; it.tail = 'bl'; }
+    await addItemToBoard(it);
+    MEMO.it = it; MEMO.fresh = true;
+  } else if (!MEMO.pushed) { pushHistory(); MEMO.pushed = true; }
+  if (it.trashedAt) return;
+  if (empty) {
+    if (!final) return;
     it.trashedAt = nowISO();
     await dbPut('items', it);
     S.items = S.items.filter(i => i.id !== it.id);
@@ -1997,15 +2317,66 @@ async function editTextItem(it) {
     selectItem(null);
     $('#board-empty').hidden = S.items.length > 0;
     touchBoard();
-    toast('からっぽにしたのでゴミ箱に入れました');
+    if (!MEMO.fresh) toast('からっぽにしたのでゴミ箱に入れました');
     return;
   }
-  it.text = v;
+  it.text = text;
+  if (hasRichFormat(html)) it.rich = html; else delete it.rich;
+  rebuildItemEl(it);
+  // 字がはみ出したら、下へのばす（書いたばかりのメモは、中身に合わせて縮めもする）
+  const nb = itemEl(it.id) && itemEl(it.id).querySelector('.note-body');
+  if (nb) {
+    nb.style.bottom = 'auto';
+    const need = Math.ceil(nb.scrollHeight);
+    nb.style.bottom = '';
+    const nh = MEMO.fresh ? Math.max(it.style === 'bubble' ? 56 : 80, need) : Math.max(it.h, need);
+    if (Math.abs(nh - it.h) > 1) { it.h = Math.min(6000, nh); updateItemEl(it); positionHandle(); }
+  }
   await dbPut('items', it);
-  const el = itemEl(it.id);
-  if (el) { const b = el.querySelector('.note-body'); if (b) b.textContent = v; }
   touchBoard();
+  if (!final) $('#memo-saved').textContent = '保存しました';
 }
+async function closeMemo() {
+  if ($('#memo').hidden) return;
+  await memoSave(true);
+  $('#memo').hidden = true;
+  memoPal('');
+  const it = MEMO.it;
+  MEMO.it = null; MEMO.fresh = false; MEMO.range = null;
+  $('#memo-body').blur();
+  if (it && !it.trashedAt && S.view === 'board') selectItem(it.id);
+}
+(() => {
+  const body = $('#memo-body');
+  body.addEventListener('input', memoChanged);
+  // 貼り付けは文字だけ（よそのページの色や大きさを持ち込まない）
+  body.addEventListener('paste', (e) => {
+    const t = e.clipboardData && e.clipboardData.getData('text/plain');
+    e.preventDefault();
+    if (t) document.execCommand('insertText', false, t);
+  });
+  body.addEventListener('drop', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const t = e.dataTransfer && e.dataTransfer.getData('text/plain');
+    if (t) { memoRestore(); document.execCommand('insertText', false, t); }
+  });
+  body.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const inList = (() => { const sel = getSelection(); let n = sel.rangeCount && sel.getRangeAt(0).startContainer; for (; n && n !== body; n = n.parentNode) if (n.nodeName === 'LI') return true; return false; })();
+      if (inList) memoCmd(e.shiftKey ? 'outdent' : 'indent'); else if (!e.shiftKey) document.execCommand('insertText', false, '\t');
+    }
+  });
+  // 道具のボタンを押しても、書いているところから離れない（選んだ文字が外れない）
+  $$('#memo-tools button').forEach(b => b.addEventListener('mousedown', (e) => e.preventDefault()));
+  $$('#memo-tools [data-cmd]').forEach(b => b.onclick = () => memoCmd(b.dataset.cmd));
+  $$('#memo-tools .mt-size').forEach(b => b.onclick = () => memoCmd('fontSize', b.dataset.sz, false));
+  $('#mt-color').onclick = () => memoPal(MEMO.pal === 'color' ? '' : 'color');
+  $('#mt-hl').onclick = () => memoPal(MEMO.pal === 'hl' ? '' : 'hl');
+  $('#memo-done').onclick = closeMemo;
+  // 外側（暗いところ）を押しても閉じる
+  $('#memo').addEventListener('pointerdown', (e) => { if (e.target === $('#memo')) closeMemo(); });
+})();
 
 /* 既に同じ画像を持っていれば使い回す（Pinterestは重複が多い） */
 let _srcIndex = null;
@@ -2321,7 +2692,8 @@ async function exportAll() {
       entries.push({ name, data: new Uint8Array(await (await realBlob(r.full)).arrayBuffer()) });
       const m = { id: r.id, w: r.w, h: r.h, srcUrl: r.srcUrl, addedAt: r.addedAt, file: name, type: r.full.type };
       // ストックのタグ・撮影データ・撮った画面の題名も持っていく（以前は落ちていた）
-      ['tags', 'exif', 'srcTitle', 'dur', 'mark'].forEach(k => { if (r[k] != null && r[k] !== '') m[k] = r[k]; });
+      ['tags', 'exif', 'srcTitle', 'dur'].forEach(k => { if (r[k] != null && r[k] !== '') m[k] = r[k]; });
+      if (marksOf(r).length) m.marks = marksOf(r);
       if (isVideoRec(r)) {
         const vb = await realBlob(r.video);
         m.video = 'videos/' + r.id + '.' + (N_EXT[vb.type] || 'mp4');
@@ -2332,7 +2704,7 @@ async function exportAll() {
       if (i % 5 === 4) await new Promise(res => setTimeout(res, 0));
     }
     const feeds = (await dbAll('meta')).filter(m => m && typeof m.key === 'string' && m.key.startsWith('feed:'));   // インスタの案
-    const meta = { app: 'MOOD BOARD', version: 1, exportedAt: nowISO(), boards, items, images: imgMeta, feeds };
+    const meta = { app: 'MOOD BOARD', version: 1, exportedAt: nowISO(), boards, items, images: imgMeta, feeds, markDefs: MARKDEFS };
     entries.unshift({ name: 'moodboard.json', data: te.encode(JSON.stringify(meta, null, 1)) });
     progSet(1, 1, 'ZIPにまとめています');
     const zip = await makeZip(entries);
@@ -2360,6 +2732,17 @@ async function importZip(file) {
     // 既存とIDがぶつからないよう、すべて振り直す
     const imgMap = new Map(), boardMap = new Map();
     const imgs = meta.images || [];
+    // しるし：名前と記号が同じものは同じしるしに。こちらに無いものは足す（以前の書き出しは最初の4つだけ）
+    const markMap = new Map();
+    let marksAdded = false;
+    for (const d of (Array.isArray(meta.markDefs) ? meta.markDefs : MARK_DEFAULTS)) {
+      if (!d || !(+d.id > 0)) continue;
+      const same = MARKDEFS.find(x => x.name === d.name && x.s === (d.s || '')) || (+d.id <= 4 && !meta.markDefs ? markDef(+d.id) : null);
+      if (same) { markMap.set(+d.id, same.id); continue; }
+      const nd = { id: MARKNEXT++, s: String(d.s || ''), name: String(d.name || ''), c: d.c || '#6b6b74' };
+      MARKDEFS.push(nd); markMap.set(+d.id, nd.id); marksAdded = true;
+    }
+    if (marksAdded) await saveMarkDefs(true);
     for (let i = 0; i < imgs.length; i++) {
       if (progCancelled) break;
       progSet(i, imgs.length, (i + 1) + ' / ' + imgs.length + ' 枚を復元中');
@@ -2376,7 +2759,9 @@ async function importZip(file) {
       const nid = uid();
       imgMap.set(m.id, nid);
       const rec = { id: nid, full: blob, thumb, w: m.w, h: m.h, srcUrl: m.srcUrl || '', addedAt: m.addedAt || nowISO() };
-      ['tags', 'exif', 'srcTitle', 'dur', 'mark'].forEach(k => { if (m[k] != null) rec[k] = m[k]; });
+      ['tags', 'exif', 'srcTitle', 'dur'].forEach(k => { if (m[k] != null) rec[k] = m[k]; });
+      const mk = (Array.isArray(m.marks) ? m.marks : (m.mark ? [m.mark] : [])).map(id => markMap.get(+id)).filter(Boolean);
+      if (mk.length) rec.marks = [...new Set(mk)];
       if (m.video && byName.get(m.video)) rec.video = new Blob([byName.get(m.video).data], { type: m.videoType || 'video/mp4' });
       await dbPut('images', rec);
       if (i % 5 === 4) await new Promise(r => setTimeout(r, 0));
@@ -2495,15 +2880,7 @@ $('#add-photosapp').onclick = () => { closeSheets(); mbCall('photosApp'); };
 $('#add-capture').onclick = () => { closeSheets(); window.webkit.messageHandlers.mb && mbCall('capture'); };
 $('#add-inbox').onclick = () => { closeSheets(); mbCall('revealInbox'); };
 $('#add-photos').onclick = () => { closeSheets(); $('#file-input').click(); };
-$('#add-text').onclick = async () => {
-  closeSheets();
-  const v = await ask('文字を書く', '', true);
-  if (v === null || !v) return;
-  pushHistory();
-  const it = await addTextToBoard(v, viewCenterCanvas());
-  selectItem(it.id);
-  touchBoard();
-};
+$('#add-text').onclick = () => openMemo(null, { style: 'note' });
 $('#add-color').onclick = () => { renderColorSheet(); openSheet('#sheet-color'); };
 $('#add-url').onclick = () => openSheet('#sheet-url');
 
@@ -3004,6 +3381,11 @@ $('#menu-delete-board').onclick = async () => {
 /* --- キーボード（PC） --- */
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  // メモを書いている間：Esc で閉じる（書いたものは保存される）。ほかのキーは文字を打つのに使う
+  if (!$('#memo').hidden) {
+    if (e.key === 'Escape' && $('#prompt').hidden && !imeKey(e)) { e.preventDefault(); closeMemo(); }
+    return;
+  }
   // 確かめる窓（はい／いいえ）が出ている間：Esc で「やめる」。ほかのキーで後ろを動かさない
   // （以前は Esc で後ろの画面だけ戻り、窓が残っていた）
   if (!$('#prompt').hidden) { if (e.key === 'Escape') { e.preventDefault(); $('#prompt-cancel').click(); } return; }
@@ -3027,6 +3409,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#scrim').hidden) return closeSheets();
   // 描いている間：Esc で終わる
   if (DRAW.on && e.key === 'Escape') return stopDraw();
+  // 範囲を囲んでいる間：Esc でやめる、⏎ で PDF に
+  if (AREA.on && $('#scrim').hidden) {
+    if (e.key === 'Escape') return stopArea();
+    if (e.key === 'Enter' && AREA.rect) { e.preventDefault(); return void $('#area-pdf').click(); }
+  }
   // 1枚表示のスポイトとガイドは Esc で先に外す
   if (!$('#viewer').hidden && e.key === 'Escape' && (VW.eyedrop || VW.guide || VW.info)) { resetViewerTools(); return; }
   if (e.key === 'Escape') {
@@ -3036,10 +3423,10 @@ document.addEventListener('keydown', (e) => {
     if (S.sel) return selectItem(null);
     if (S.view === 'board') return goHome();
   }
-  // 1枚表示：← → で前後の写真、1〜4 でしるし（0 で外す）、ストックから開いたときはスペースで閉じる（Finder の「クイックルック」と同じ）
+  // 1枚表示：← → で前後の写真、1〜9 でしるし（0 で全部外す）、ストックから開いたときはスペースで閉じる（Finder の「クイックルック」と同じ）
   if (!$('#viewer').hidden && $('#scrim').hidden && !kmod(e) && !e.altKey && e.target.tagName !== 'VIDEO') {
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); return void viewerStep(e.key === 'ArrowRight' ? 1 : -1); }
-    if (/^[0-4]$/.test(e.key)) { e.preventDefault(); return void viewerMark(+e.key); }
+    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); return void viewerMark(markIdAt(+e.key)); }
     if (e.key === ' ' && $('#viewer').classList.contains('from-stock')) {
       e.preventDefault();
       if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();   // 離したときに、しるしのボタンなどを押さない
@@ -3131,6 +3518,7 @@ window.addEventListener('resize', () => { if (S.view === 'board') positionHandle
     } catch (e) { /* 失敗しても動作はする */ }
   }
   loadSettings();
+  await loadMarkDefs();     // しるしの名前・色（自分で変えたもの）を、描く前に読む
   document.body.classList.add('at-home');
   await renderHome();
   // 開発中(localhost)は登録しない。古いキャッシュを掴んで混乱するため（?sw=1 を付けたときだけ、試験のために登録する）
@@ -3650,7 +4038,7 @@ function buildPrint() {
 
 /* 印刷用：補正・反転・描いた線・チェックリスト・吹き出しは、画面と同じに描いた画像にして並べる */
 let PRINT_PAINTED = new Map();
-const needsPainted = (it) => it.type === 'draw' || it.type === 'list' || it.style === 'bubble' ||
+const needsPainted = (it) => it.type === 'draw' || it.type === 'list' || it.style === 'bubble' || (it.type === 'text' && !!it.rich) ||
   hasAdj(it) || !!it.flipX || !!it.flipY || (it.opacity != null && it.opacity < 1);
 async function preparePrintPainted() {
   PRINT_PAINTED = new Map();
@@ -3715,6 +4103,7 @@ function syncPrintChips() {
 function updatePrintCount() {
   const el = $('#print-count');
   if (!el) return;
+  if (PRINT.scope === 'area') { el.innerHTML = '押すと、盤面で<b>PDF にしたいところを囲む</b>画面になります'; return; }
   let pages = 0;
   try { pages = buildPrint(); } catch (e) { pages = 0; }
   const P = PAPER[PRINT.paper];
@@ -3751,7 +4140,7 @@ $('#btn-bulk-print').onclick = () => {
   openSheet('#sheet-print');
 };
 $('#print-cancel').onclick = closeSheets;
-$('#print-go').onclick = () => { closeSheets(); doPrint(); };
+$('#print-go').onclick = () => { closeSheets(); if (PRINT.scope === 'area') return startArea(); doPrint(); };
 window.addEventListener('afterprint', () => { $('#paper').innerHTML = ''; });
 
 /* ==========================================================================
@@ -4250,18 +4639,22 @@ function drawTextCardToCanvas(ctx, it, x, y, w, h, scale, withShadow = true) {
   ctx.fillStyle = fillCol;
   shape(); ctx.fill();
   ctx.restore();
-  ctx.fillStyle = cc ? cc.fg : (bubble ? '#18181b' : '#2a2415');
-  const fs = Math.max(8, (bubble ? 13.5 : 14) * scale);
-  ctx.font = fs + 'px -apple-system,"Hiragino Sans",sans-serif';
-  ctx.textBaseline = 'top';
-  ctx.textAlign = 'left';
-  const pad = (bubble ? 15 : 12) * scale;
-  const lines = wrapCanvasText(ctx, it.text || '', w - pad * 2);
-  let ty = y + pad;
-  for (const ln of lines) {
-    if (ty > y + h - pad) break;
-    ctx.fillText(ln, x + pad, ty);
-    ty += fs * 1.4;
+  // 文字は盤面と同じ組み方で（書式つきのメモも、書式の無いメモも）
+  try { paintRichText(ctx, it, x, y, w, h); }
+  catch (e) {
+    ctx.fillStyle = cc ? cc.fg : (bubble ? '#18181b' : '#2a2415');
+    const fs = Math.max(8, (bubble ? 13.5 : 14) * scale);
+    ctx.font = fs + 'px -apple-system,"Hiragino Sans",sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    const pad = (bubble ? 15 : 12) * scale;
+    const lines = wrapCanvasText(ctx, it.text || '', w - pad * 2);
+    let ty = y + pad;
+    for (const ln of lines) {
+      if (ty > y + h - pad) break;
+      ctx.fillText(ln, x + pad, ty);
+      ty += fs * 1.4;
+    }
   }
 }
 
@@ -4275,12 +4668,13 @@ async function exportBoardPNG() {
   try {
     const b = boardBounds();
     const PAD = 44, HEAD = 86;
-    const MAXEDGE = 2600;
+    const MAXEDGE = 4096;                  // 2026-10-30 まで2600（拡大すると粗かった）
     const w0 = b.w + PAD * 2;
     const h0 = b.h + PAD * 2 + HEAD;
     // ※ 以前は縮小の下限を0.4にしていたため、盤面が広いとキャンバスがブラウザの上限を超えて
-    //   何も返ってこず「作れませんでした」になっていた。下限は設けず、長辺 MAXEDGE に必ず収める
-    const scale = Math.min(MAXEDGE / Math.max(w0, h0), 2.2);
+    //   何も返ってこず「作れませんでした」になっていた。下限は設けず、長辺 MAXEDGE に必ず収める。
+    //   面積も iPhone の canvas の上限（約1677万画素）に収める
+    const scale = Math.min(MAXEDGE / Math.max(w0, h0), Math.sqrt(16e6 / (w0 * h0)), 3);
     const W = Math.round(w0 * scale), H = Math.round(h0 * scale);
 
     const c = document.createElement('canvas');
@@ -4652,8 +5046,9 @@ function renderGrid() {
       cell.style.aspectRatio = (it.w / it.h).toFixed(3);
       const t = document.createElement('div');
       t.className = 'gtext-body';
-      t.textContent = it.text || '';
+      fillRich(t, it);
       const gc = cardColors(it); if (gc) { cell.style.background = gc.bg; t.style.color = gc.fg; }
+      t.style.setProperty('--paper', memoPaper(it));
       cell.appendChild(t);
     } else {
       const rec = S.imgs.get(it.imageId);
@@ -5278,7 +5673,7 @@ $('#viewer-rotate').onclick = async () => {
     dec.close();
     const blob = await canvasToBlob(c, pickType(), FULL_Q);
 
-    const made = await storeImage(blob, rec.srcUrl || '', Object.assign({ derived: true }, rec.mark ? { mark: rec.mark } : {}));   // 切り抜き・まわすで途中にできた写真（しるしは引き継ぐ）
+    const made = await storeImage(blob, rec.srcUrl || '', Object.assign({ derived: true }, marksOf(rec).length ? { marks: marksOf(rec) } : {}));   // 切り抜き・まわすで途中にできた写真（しるしは引き継ぐ）
     pushHistory();
     it.rotFrom = base;                                  // 回す前の姿は消さずに控えておく
     it.rot = next;
@@ -5320,7 +5715,7 @@ $('#crop-ok').onclick = async () => {
     const blob = await canvasToBlob(c, pickType(), FULL_Q);
 
     // 元の写真は消さずに残す。切り抜きは別の写真として作る
-    const made = await storeImage(blob, rec.srcUrl || '', Object.assign({ derived: true }, rec.mark ? { mark: rec.mark } : {}));   // 切り抜き・まわすで途中にできた写真（しるしは引き継ぐ）
+    const made = await storeImage(blob, rec.srcUrl || '', Object.assign({ derived: true }, marksOf(rec).length ? { marks: marksOf(rec) } : {}));   // 切り抜き・まわすで途中にできた写真（しるしは引き継ぐ）
     pushHistory();
     if (!it.croppedFrom) it.croppedFrom = it.imageId;   // 最初の切り抜きのときだけ元を控える
     it.imageId = made.id;
@@ -5455,7 +5850,10 @@ $('#arr-section').onclick = () => { closeSheets(); arrangeBySection(); };
    各ページは canvas で描いた絵を JPEG にして埋め込む（PDFはJPEGをそのまま入れられる）。
    この作りなら日本語も確実に出る（PDFに日本語フォントを埋め込む必要がない）。
    ========================================================================== */
-const PDF_DPI = 150;                       // 印刷に耐える程度。大きすぎるとファイルが重い
+const PDF_DPI = 300;                       // 印刷の標準（2026-10-30 まで150。拡大すると粗かった）
+// 用紙に合わせた解像度。iPhone の canvas は約1677万画素までなので、A3 などはそこに収まるまで下げる
+const pdfDpi = (P) => Math.min(PDF_DPI, Math.floor(Math.sqrt(16e6 / ((P.w / 25.4) * (P.h / 25.4)))));
+const PDF_Q = 0.92;
 const MM2PT = 72 / 25.4;
 
 function pdfEscape(str) {
@@ -5512,16 +5910,22 @@ function buildPDF(pages, title) {
 /* 盤面を1枚の絵にして、その絵をA4に収めたPDFにする */
 async function exportBoardPDF(mode, opts = {}) {
   // opts.items: 描くものを直接渡す（送る から）／ opts.returnBlob: 保存せずに中身を返す
-  const all = opts.items || ((PRINT.scope === 'picked' && S.picked.length)
+  // opts.area: 囲んだ範囲（盤面の座標）。その中だけを、はみ出した分は切って1ページに
+  const area = opts.area || null;
+  if (area) mode = 'board';
+  const all = area ? areaItems(area) : opts.items || ((PRINT.scope === 'picked' && S.picked.length)
     ? S.picked.map(id => S.items.find(i => i.id === id)).filter(Boolean)
     : S.items.filter(i => !i.trashedAt));
   // 描いた線は位置関係あっての書き込みなので、1枚ずつのときは入れない
   const items = mode === 'one' ? all.filter(i => i.type !== 'draw') : all;
   if (!items.length) return toast('PDFにするものがありません');
 
-  const P = PAPER[PRINT.paper] || PAPER.a4p;
+  let P = PAPER[PRINT.paper] || PAPER.a4p;
+  // 囲んだ範囲は、その形に合わせて たて／よこ を選ぶ（大きさは選んである用紙のまま）
+  if (area) P = PAPER[(P.size === 'A3' ? 'a3' : 'a4') + ((area.x2 - area.x1) / Math.max(1, area.y2 - area.y1) > 1.15 ? 'l' : 'p')];
   const wPt = P.w * MM2PT, hPt = P.h * MM2PT;
-  const px = Math.round(P.w / 25.4 * PDF_DPI), py = Math.round(P.h / 25.4 * PDF_DPI);
+  const dpi = pdfDpi(P);
+  const px = Math.round(P.w / 25.4 * dpi), py = Math.round(P.h / 25.4 * dpi);
 
   progOpen('PDFを作っています');
   try {
@@ -5533,7 +5937,7 @@ async function exportBoardPDF(mode, opts = {}) {
       ctx.fillStyle = '#ffffff';            // 紙なので白地
       ctx.fillRect(0, 0, px, py);
       await draw(ctx, px, py);
-      const blob = await canvasToBlob(c, 'image/jpeg', 0.88);
+      const blob = await canvasToBlob(c, 'image/jpeg', PDF_Q);
       pages.push({ jpg: new Uint8Array(await blob.arrayBuffer()), wPt, hPt, px, py });
     };
 
@@ -5565,18 +5969,21 @@ async function exportBoardPDF(mode, opts = {}) {
       // 盤面の配置のまま1ページに収める
       progSet(0, 1, '組んでいます');
       let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-      items.forEach(it => {
+      if (area) ({ x1, y1, x2, y2 } = area);
+      else items.forEach(it => {
         x1 = Math.min(x1, it.x); y1 = Math.min(y1, it.y);
         x2 = Math.max(x2, it.x + it.w); y2 = Math.max(y2, it.y + it.h);
       });
       const bw = x2 - x1, bh = y2 - y1;
       await makePage(async (ctx, W, H) => {
         const headH = Math.round(px * 0.055);
-        await drawPdfHeader(ctx, W, margin, title, items.length + ' 枚');
-        const area = { x: margin, y: margin + headH, w: W - margin * 2, h: H - margin * 2 - headH };
-        const sc = Math.min(area.w / bw, area.h / bh);
-        const offX = area.x + (area.w - bw * sc) / 2;
-        const offY = area.y + (area.h - bh * sc) / 2;
+        await drawPdfHeader(ctx, W, margin, title, items.filter(i => i.imageId).length + ' 枚');
+        const box = { x: margin, y: margin + headH, w: W - margin * 2, h: H - margin * 2 - headH };
+        const sc = Math.min(box.w / bw, box.h / bh);
+        const offX = box.x + (box.w - bw * sc) / 2;
+        const offY = box.y + (box.h - bh * sc) / 2;
+        // 囲んだ範囲は、そこからはみ出した分を切る（スクリーンショットと同じ）
+        if (area) { ctx.save(); ctx.beginPath(); ctx.rect(offX, offY, bw * sc, bh * sc); ctx.clip(); }
         const ordered = [...items].sort((a, b) => (a.z || 0) - (b.z || 0));
         for (const it of ordered) {
           await drawItemInto(ctx, it, {
@@ -5587,6 +5994,7 @@ async function exportBoardPDF(mode, opts = {}) {
         // 区分けの見出しも描く。画面の見出しは要素として持っていないので、
         // ここで同じ位置を計算し直す（これが無いと渡した相手に区分けが伝わらない）
         drawSectionLabels(ctx, items, { x1, y1, sc, offX, offY }, W);
+        if (area) ctx.restore();
       });
     }
 
@@ -5601,6 +6009,125 @@ async function exportBoardPDF(mode, opts = {}) {
     progClose();
     toast('PDFにできませんでした<br>' + e.message, 4000);
   }
+}
+
+/* ==========================================================================
+   範囲を囲んで PDF・画像にする  2026-10-30
+   盤面の一部だけを、スクリーンショットのように切り取って渡したいとき。
+   ドラッグで囲んだ四角の中だけを描き直す（画面を撮るのではないので、拡大しても粗くならない）。
+   囲んでいる間も、2本指・ピンチ・スペース＋ドラッグで盤面を動かせる
+   ========================================================================== */
+const AREA = { on: false, rect: null };
+const areaItems = (r) => S.items.filter(i => !i.trashedAt && i.x < r.x2 && i.x + i.w > r.x1 && i.y < r.y2 && i.y + i.h > r.y1);
+function startArea() {
+  if (S.view !== 'board') return toast('先にボードを開いてください');
+  if (!S.items.length) return toast('写真がありません');
+  closeSheets();
+  if (DRAW.on) stopDraw();
+  if (S.picking) stopPicking();
+  selectItem(null);
+  AREA.on = true; AREA.rect = null;
+  setDock('area');
+  syncArea();
+  toast('PDF や画像にしたいところを、ドラッグで囲んでください', 3200);
+}
+function stopArea() {
+  AREA.on = false; AREA.rect = null;
+  syncArea();
+  setDock('board');
+}
+function syncArea() {
+  let box = $('#area-box');
+  if (!AREA.on || !AREA.rect) { if (box) box.remove(); }
+  else {
+    if (!box) { box = document.createElement('div'); box.id = 'area-box'; }
+    if (box.parentNode !== canvas) canvas.appendChild(box);
+    const r = AREA.rect;
+    box.style.transform = 'translate(' + r.x1 + 'px,' + r.y1 + 'px)';
+    box.style.width = (r.x2 - r.x1) + 'px';
+    box.style.height = (r.y2 - r.y1) + 'px';
+    box.style.setProperty('--k', 1 / S.cam.k);      // 線の太さを、寄せても引いても同じに見せる
+  }
+  const has = AREA.on && !!AREA.rect;
+  $('#area-pdf').disabled = !has; $('#area-png').disabled = !has;
+  $('#area-hint').textContent = has ? 'ドラッグで囲み直せる' : 'ドラッグで囲む';
+}
+$('#area-cancel').onclick = stopArea;
+$('#area-pdf').onclick = async () => { const r = AREA.rect; if (!r) return; stopArea(); await exportBoardPDF('board', { area: r }); };
+$('#area-png').onclick = async () => { const r = AREA.rect; if (!r) return; stopArea(); await exportAreaImage(r); };
+$('#menu-area').onclick = () => { closeSheets(); startArea(); };
+/* 囲んだ範囲を1枚の画像に。背景は盤面と同じ色（見たままを切り取る） */
+async function exportAreaImage(r) {
+  const items = areaItems(r);
+  if (!items.length) return toast('囲んだところに何もありません');
+  progOpen('画像を作っています');
+  try {
+    const bw = r.x2 - r.x1, bh = r.y2 - r.y1;
+    const scale = Math.min(4096 / Math.max(bw, bh), Math.sqrt(16e6 / (bw * bh)), 4);
+    const W = Math.max(1, Math.round(bw * scale)), H = Math.max(1, Math.round(bh * scale));
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = bgPreset().bg; ctx.fillRect(0, 0, W, H);
+    const ordered = [...items].sort((a, b) => (a.z || 0) - (b.z || 0));
+    for (let i = 0; i < ordered.length; i++) {
+      if (progCancelled) { progClose(); return; }
+      progSet(i, ordered.length, (i + 1) + ' / ' + ordered.length);
+      const it = ordered[i];
+      await paintItem(ctx, it, { x: (it.x - r.x1) * scale, y: (it.y - r.y1) * scale, w: it.w * scale, h: it.h * scale }, { scale, shadow: true });
+      if (i % 4 === 3) await new Promise(res => setTimeout(res, 0));
+    }
+    drawSectionLabels(ctx, items, { x1: r.x1, y1: r.y1, sc: scale, offX: 0, offY: 0 }, W);
+    const blob = await canvasToBlob(c, 'image/jpeg', 0.94);
+    progClose();
+    saveBlob(blob, (S.board.name || 'moodboard').replace(/[\/\\:*?"<>|]/g, '_') + '_範囲.jpg');
+    toast('画像にしました（' + W + '×' + H + '・' + fmtBytes(blob.size) + '）', 4200);
+  } catch (e) {
+    progClose();
+    toast('作れませんでした<br>' + e.message);
+  }
+}
+
+/* ==========================================================================
+   盤面で大きく見ているときは、元の大きさの写真に差し替える  2026-10-30
+   盤面はふだん長辺480pxの小さい写真で並べている（何百枚でも軽いように）。寄せて見ると粗く見えていたので、
+   画面の上で小さい写真より大きく映っている写真だけを、取り込んだときの大きい写真に差し替える。
+   引いたら小さい写真に戻す。大きくするのは、いちばん大きく映っている40枚まで（メモリを食いすぎないように）
+   ========================================================================== */
+let hiresT = 0;
+function scheduleHires() { clearTimeout(hiresT); hiresT = setTimeout(updateHires, 160); }
+function updateHires() {
+  if (S.view !== 'board' || S.mode === 'grid') return;
+  const wr = $('#canvas-wrap').getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1, k = S.cam.k;
+  const want = [];
+  for (const it of S.items) {
+    const rec = it.imageId && S.imgs.get(it.imageId);
+    if (!rec || !rec.thumb || isVideoRec(rec)) continue;
+    const sx = it.x * k + S.cam.x, sy = it.y * k + S.cam.y, sw = it.w * k, sh = it.h * k;
+    if (sx > wr.width + 60 || sy > wr.height + 60 || sx + sw < -60 || sy + sh < -60) continue;   // 画面の外
+    const px = Math.max(sw, sh) * dpr;
+    if (px > THUMB_EDGE * 1.1) want.push({ id: it.id, px });
+  }
+  want.sort((a, b) => b.px - a.px);
+  const keep = new Set(want.slice(0, 40).map(w => w.id));
+  const byId = new Map(S.items.map(i => [i.id, i]));
+  canvas.querySelectorAll('.item.photo-item').forEach(el => {
+    const im = el.querySelector(':scope > img.fx');
+    const it = byId.get(el.dataset.id);
+    const rec = it && S.imgs.get(it.imageId);
+    if (!im || !rec) return;
+    if (keep.has(it.id)) {
+      if (im.dataset.res === 'f') return;
+      im.dataset.res = 'f';
+      const url = blobURL(rec.id, 'f', rec.full);
+      // 読み終わってから差し替える（途中で一瞬消えないように）
+      const pre = new Image(); pre.src = url;
+      (pre.decode ? pre.decode() : Promise.resolve()).then(() => { if (im.dataset.res === 'f') im.src = url; }).catch(() => { });
+    } else if (im.dataset.res === 'f') {
+      im.dataset.res = '';
+      im.src = blobURL(rec.id, 't', rec.thumb || rec.full);
+    }
+  });
 }
 
 /* 見出し（ボード名と枚数）。日本語も絵として描くので確実に出る */
@@ -5637,6 +6164,7 @@ async function drawItemInto(ctx, it, box, exact) {
 /* PDFの入口。印刷の設定（用紙・対象）をそのまま使う */
 $('#pdf-go').onclick = () => {
   closeSheets();
+  if (PRINT.scope === 'area') return startArea();
   exportBoardPDF(PRINT.mode === 'one' ? 'one' : 'board');
 };
 $('#menu-pdf').onclick = () => {
@@ -5768,6 +6296,7 @@ async function runTool(tool) {
     case 'harmony': return openHarmony(t);
     case 'gray': closeSheets(); return setView('gray', !VIEW.gray);
     case 'mirror': closeSheets(); return setView('mirror', !VIEW.mirror);
+    case 'oneby': closeSheets(); return openOneByOne();
     case 'present': closeSheets(); return startPresent();
     case 'insta': {
       // 選んでいればその写真を、いまの案の左上に。選んでいなければ、このボードの写真で新しい案を（上から順に）
@@ -6041,21 +6570,7 @@ async function finishDraw(g) {
 }
 
 /* ---------- かく：吹き出し・チェックリスト ---------- */
-async function addBubble() {
-  const v = await ask('吹き出しのことば', '', true);
-  if (v === null || !v.trim()) return;
-  pushHistory();
-  const c = viewCenterCanvas();
-  const lines = v.split('\n').reduce((n, ln) => n + Math.max(1, Math.ceil(ln.length / 14)), 0);
-  const w = 232, h = Math.round(clamp(30 + lines * 22, 64, 320));
-  const it = {
-    id: uid(), boardId: S.boardId, type: 'text', style: 'bubble', tail: 'bl', text: v,
-    x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2), w, h,
-    z: maxZ() + 1, note: '', tags: [], addedAt: nowISO(),
-  };
-  await addItemToBoard(it);
-  selectItem(it.id);
-}
+function addBubble() { return openMemo(null, { style: 'bubble' }); }
 async function editChecklist(it) {
   const title = await ask('チェックリストの見出し（例：撮るカット・持ち物）', it ? (it.title || '') : 'ショットリスト');
   if (title === null) return null;
@@ -6229,12 +6744,19 @@ async function placeSwatchRow(hexes, name) {
 
 /* ---------- 見る：プレゼン（1つずつ大きく見せる） ---------- */
 let PR = null;
-function presentList() {
-  // 読む順：上の段から、同じ段なら左から（段の高さは写真のおおよその高さ）
-  const list = S.items.filter(i => i.type !== 'draw');
-  const band = list.length ? list.reduce((a, i) => a + i.h, 0) / list.length * 0.6 : 200;
-  return list.sort((a, b) => (Math.floor(a.y / band) - Math.floor(b.y / band)) || (a.x - b.x));
+// 読む順：上の段から、同じ段なら左から。段は「その段の最初の1枚から、写真のおおよその高さの6割まで」。
+// （以前は座標を一定の幅で区切っていたので、石積みで少しずれた隣の写真が別の段に分かれ、左右に飛んでいた）
+function readingOrder(list) {
+  if (!list.length) return list;
+  const band = list.reduce((a, i) => a + i.h, 0) / list.length * 0.6;
+  const rows = [];
+  for (const it of list.slice().sort((a, b) => a.y - b.y)) {
+    const row = rows[rows.length - 1];
+    if (row && it.y - row.y0 < band) row.items.push(it); else rows.push({ y0: it.y, items: [it] });
+  }
+  return rows.flatMap(r => r.items.sort((a, b) => a.x - b.x));
 }
+function presentList() { return readingOrder(S.items.filter(i => i.type !== 'draw')); }
 function startPresent() {
   const list = presentList();
   if (!list.length) return toast('見せるものがありません');
@@ -6925,12 +7447,13 @@ const KEYMAP = [
   { id: 'flipX', g: '直す', keys: '⇧H', name: '左右反転', where: 'board', m: e => plain(e) && e.shiftKey && kis(e, 'h'), run: () => flipItems(keyTargets().filter(isPhoto), 'flipX') },
   { id: 'flipY', g: '直す', keys: '⇧V', name: '上下反転', where: 'board', m: e => plain(e) && e.shiftKey && kis(e, 'v'), run: () => flipItems(keyTargets().filter(isPhoto), 'flipY') },
   { id: 'lock', g: '直す', keys: '⇧⌘L', name: '固定する／外す', where: 'board', m: e => kmod(e) && e.shiftKey && kis(e, 'l'), run: () => toggleLock(keyTargets()) },
-  { id: 'view', g: '見る', keys: '⏎', name: '大きく見る（写真を1枚選んで）', where: 'board', m: e => plain(e) && e.key === 'Enter', run: () => { const p = keyTargets().find(isPhoto); if (p) openViewer(p); } },
-  { id: 'mark1', g: 'しるし', keys: '1', name: '◎ 本命（もう一度で外す）', where: 'board', m: e => plain(e) && e.key === '1', run: () => markKey(1) },
-  { id: 'mark2', g: 'しるし', keys: '2', name: '○ 候補', where: 'board', m: e => plain(e) && e.key === '2', run: () => markKey(2) },
-  { id: 'mark3', g: 'しるし', keys: '3', name: '△ 保留', where: 'board', m: e => plain(e) && e.key === '3', run: () => markKey(3) },
-  { id: 'mark4', g: 'しるし', keys: '4', name: '✕ 見送り', where: 'board', m: e => plain(e) && e.key === '4', run: () => markKey(4) },
+  { id: 'view', g: '見る', keys: '⏎', name: '大きく見る・1枚ずつ見る（選んでいなければ1枚目から）', where: 'board', m: e => plain(e) && e.key === 'Enter', run: () => { const p = keyTargets().find(isPhoto); if (p) openViewer(p); else openOneByOne(); } },
+  // しるし：上から順に 1〜9。名前は自分で変えられるので、その場で読む（無い番号は一覧にも出さない）
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => ({ id: 'mark' + n, g: 'しるし', keys: String(n),
+    get name() { const d = MARKDEFS[n - 1]; return d ? markSym(d) + ' ' + d.name + (n === 1 ? '（もう一度で外す）' : '') : ''; },
+    where: 'board', m: e => plain(e) && e.key === String(n) && !!MARKDEFS[n - 1], run: () => markKey(n) })),
   { id: 'mark0', g: 'しるし', keys: '0', name: 'しるしを外す', where: 'board', m: e => plain(e) && e.key === '0', run: () => markKey(0) },
+  { id: 'markEdit', g: 'しるし', name: 'しるしを足す・変える', where: 'any', run: () => openMarkEditor() },
   { id: 'fit', g: '見る', keys: 'F ／ ⌘0', name: '全体を見る', where: 'board', m: e => (plain(e) && !e.shiftKey && kis(e, 'f')) || (kmod(e) && e.key === '0'), run: () => fitAll() },
   { id: 'zoom100', g: '見る', keys: '⌘1', name: '等倍（100%）', where: 'board', m: e => kmod(e) && e.key === '1', run: () => zoomCenter(1, true) },
   { id: 'zoomIn', g: '見る', keys: '⌘＋ ／ ⌘−', name: '拡大 ／ 縮小', where: 'board', m: e => kmod(e) && ['+', '=', ';'].includes(e.key), run: () => zoomCenter(1.25) },
@@ -6941,6 +7464,7 @@ const KEYMAP = [
   { id: 'gray', g: '見る', name: '白黒で見る', where: 'board', run: () => setView('gray', !VIEW.gray) },
   { id: 'mirror', g: '見る', name: '反転して見る', where: 'board', run: () => setView('mirror', !VIEW.mirror) },
   { id: 'present', g: '見る', name: 'プレゼン', where: 'board', run: () => startPresent() },
+  { id: 'oneby', g: '見る', name: '1枚ずつ見る', where: 'board', run: () => openOneByOne() },
   { id: 'pen', g: 'かく', keys: 'P', name: 'ペン', where: 'board', m: e => plain(e) && !e.shiftKey && kis(e, 'p'), run: () => startDraw('pen') },
   { id: 'line', g: 'かく', keys: 'L', name: '線・矢印', where: 'board', m: e => plain(e) && !e.shiftKey && kis(e, 'l'), run: () => startDraw('arrow') },
   { id: 'shape', g: 'かく', keys: 'R', name: '四角・丸', where: 'board', m: e => plain(e) && !e.shiftKey && kis(e, 'r'), run: () => startDraw('rect') },
@@ -6950,6 +7474,7 @@ const KEYMAP = [
   { id: 'find', g: '道具', keys: '⌘F', name: 'さがす', where: 'board', m: e => kmod(e) && !e.shiftKey && kis(e, 'f'), run: () => $('#btn-search').click() },
   { id: 'send', g: '送る', keys: '⌘P', name: '送る・印刷・PDF', where: 'board', m: e => kmod(e) && !e.shiftKey && kis(e, 'p'), run: () => openSend() },
   { id: 'png', g: '送る', keys: '⇧⌘E', name: '1枚の画像に書き出す', where: 'board', m: e => kmod(e) && e.shiftKey && kis(e, 'e'), run: () => exportBoardPNG() },
+  { id: 'areaPdf', g: '送る', name: '範囲を囲んで PDF・画像に', where: 'board', run: () => startArea() },
   { id: 'stock', g: 'ボード', name: 'ストックを開く', where: 'any', run: () => { if (S.view === 'board') goHome(); showStock(true); } },
   { id: 'exportAll', g: '送る', name: 'まるごと書き出し（ZIP）', where: 'any', run: () => exportAll() },
   { id: 'zip', g: 'いれる', name: 'ZIPから読み込む', where: 'any', run: () => pickZip() },
@@ -6977,16 +7502,18 @@ window.mbMenu = (id) => {
   if (!k || !k.run) return;
   if (lastKeyRun.id === id && Date.now() - lastKeyRun.t < 400) return;
   if (!$('#progress').hidden) return toast('いまの作業が終わってからにしてください');
+  // メモを書いている間は、メニューの ⌘D などで後ろの盤面を動かさない
+  if (!$('#memo').hidden && !['help', 'keys', 'settings'].includes(id)) return;
   // しるし：1枚表示で見ている写真・ストックで選んでいる写真にも付けられる
   if (/^mark\d$/.test(id)) {
     const n = +id.slice(4);
-    if (!$('#viewer').hidden) return void viewerMark(n);
-    if (S.view === 'home' && STOCK.on && STOCK.sel.size) return void setMarks([...STOCK.sel], n);
+    if (!$('#viewer').hidden) return void viewerMark(markIdAt(n));
+    if (S.view === 'home' && STOCK.on && STOCK.sel.size) return void setMarks([...STOCK.sel], markIdAt(n));
   }
   if (k.where === 'board' && S.view !== 'board') return toast('先にボードを開いてください');
   closeSheets();
   // 説明書・設定などはシートで上に開くのでそのまま。それ以外は、1枚表示・みくらべ・切り抜き・プレゼンの後ろで動かないよう先に閉じる
-  if (!['help', 'keys', 'settings'].includes(id)) closeOverlays();
+  if (!['help', 'keys', 'settings', 'markEdit'].includes(id)) closeOverlays();
   k.run();
 };
 function closeOverlays() {
@@ -7160,13 +7687,14 @@ function renderStockFilters() {
   const chips = [['all', 'すべて ' + STOCK.all.length], ['loose', 'ボードに無い ' + loose]];
   const vids = STOCK.all.filter(isVideoRec).length;
   if (vids) chips.push(['video', '動画 ' + vids]);
-  for (let k = 1; k < MARKS.length; k++) {
-    const n = STOCK.all.filter(r => r.mark === k).length;
-    if (n || STOCK.filter === 'mark:' + k) chips.push(['mark:' + k, MARKS[k].s + ' ' + MARKS[k].name + ' ' + n]);
-  }
+  MARKDEFS.forEach(d => {
+    const n = STOCK.all.filter(r => marksOf(r).includes(d.id)).length;
+    if (n || STOCK.filter === 'mark:' + d.id) chips.push(['mark:' + d.id, d, n]);
+  });
   [...tagCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 16).forEach(([t, n]) => chips.push(['tag:' + t, t + ' ' + n]));
-  chips.forEach(([v, label]) => {
-    const c = inspEl('button', 'chip' + (STOCK.filter === v ? ' on' : ''), label);
+  chips.forEach(([v, label, n]) => {
+    const c = inspEl('button', 'chip' + (STOCK.filter === v ? ' on' : ''), typeof label === 'string' ? label : '');
+    if (typeof label !== 'string') { markLabel(c, label, n); c.classList.add('mk-chip'); c.style.setProperty('--mkc', label.c); }
     c.onclick = () => { STOCK.filter = (STOCK.filter === v && v !== 'all') ? 'all' : v; renderStockFilters(); applyStockFilter(); };
     box.appendChild(c);
   });
@@ -7185,7 +7713,7 @@ function applyStockFilter() {
     if (STOCK.filter === 'loose' && !inf.loose) return false;
     if (STOCK.filter === 'video' && !isVideoRec(r)) return false;
     if (STOCK.filter.startsWith('tag:') && !inf.tags.includes(STOCK.filter.slice(4))) return false;
-    if (STOCK.filter.startsWith('mark:') && String(r.mark || 0) !== STOCK.filter.slice(5)) return false;
+    if (STOCK.filter.startsWith('mark:') && !marksOf(r).includes(+STOCK.filter.slice(5))) return false;
     if (STOCK.shape && shapeOf(r) !== STOCK.shape) return false;
     if (STOCK.color && !colorMatch(r, STOCK.color)) return false;
     return words.every(w => inf.text.includes(w));
@@ -7288,106 +7816,248 @@ function stockKey(e) {
     openStockViewer(STOCK.anchor && STOCK.sel.has(STOCK.anchor) ? STOCK.anchor : [...STOCK.sel][0]);
     return true;
   }
-  if (!meta && !e.altKey && /^[0-4]$/.test(e.key) && STOCK.sel.size) { e.preventDefault(); setMarks([...STOCK.sel], +e.key); return true; }
+  if (!meta && !e.altKey && /^[0-9]$/.test(e.key) && STOCK.sel.size) { e.preventDefault(); setMarks([...STOCK.sel], markIdAt(+e.key)); return true; }
   return false;
 }
 
 /* ==========================================================================
-   しるし（◎ 本命・○ 候補・△ 保留・✕ 見送り）  2026-10-27
-   比べて選ぶための目印（Eagle の星・FigJam のスタンプにあたるもの）。写真そのもの（images の記録）に付けるので、
+   しるし（◎ 本命・○ 候補・△ 保留・✕ 見送り ＋ 自分で足したもの）  2026-10-27 → 2026-10-29 タグのように
+   比べて選ぶための目印（Eagle の星・Finder のタグにあたるもの）。写真そのもの（images の記録）に付けるので、
    どのボード・グリッド・ストック・くらべる でも同じしるしが見える。
-   1〜4 のキーで付け、0 で外す（ボードで選んでいるとき・ストックで選んでいるとき・1枚表示で見ているとき）。
-   同じしるしをもう一度付けると外れる
+   ・1枚に いくつでも付く（rec.marks：しるしの番号の並び。以前の1つだけの rec.mark も読める）
+   ・名前・記号・色は自由に変えられ、自分のしるしを足せる（「足す・変える」）。最初の4つは消せない
+   ・しるしの一覧はライブラリ（meta の 'marks'）に置く。番号は使い回さない（消したしるしが、別の写真に生き返らないように）
+   ・上から順に 1〜9 のキーで付け外し、0 で全部外す（ボードで選んでいるとき・ストックで選んでいるとき・1枚表示で見ているとき）。
+     選んだ写真が全部そのしるしを持っていれば外し、そうでなければ付ける
    ========================================================================== */
-const MARKS = [null,
-  { s: '◎', name: '本命', c: '#ff5a36' },
-  { s: '○', name: '候補', c: '#1f9d63' },
-  { s: '△', name: '保留', c: '#d08a00' },
-  { s: '✕', name: '見送り', c: '#6b6b74' }];
-const markOf = (rec) => (rec && MARKS[rec.mark]) || null;
-function markBadge(rec) {
-  const m = markOf(rec);
-  if (!m) return null;
-  const b = inspEl('i', 'mk', m.s);
-  b.style.setProperty('--mkc', m.c);
-  b.title = m.name;
+const MARK_DEFAULTS = [
+  { id: 1, s: '◎', name: '本命', c: '#ff5a36' },
+  { id: 2, s: '○', name: '候補', c: '#1f9d63' },
+  { id: 3, s: '△', name: '保留', c: '#d08a00' },
+  { id: 4, s: '✕', name: '見送り', c: '#6b6b74' }];
+const MARK_COLORS = ['#ff5a36', '#e0453a', '#ee8a2c', '#d08a00', '#c9a400', '#1f9d63', '#2fa6a0', '#3a74d8', '#8a56c9', '#e46aa6', '#6b6b74', '#111114'];
+let MARKDEFS = MARK_DEFAULTS.map(m => ({ ...m })), MARKNEXT = 5;
+const markDef = (id) => MARKDEFS.find(m => m.id === id) || null;
+const markIdx = (id) => { const i = MARKDEFS.findIndex(m => m.id === id); return i < 0 ? 99 : i; };
+const markIdAt = (n) => n ? ((MARKDEFS[n - 1] || {}).id || -1) : 0;          // キーの番号（上から何番目か）→ しるしの番号
+const markSym = (d) => d.s || Array.from(d.name || '・')[0];                 // 記号を空にしたら、名前の1文字目
+const markName = (d) => (window.MB_I18N ? MB_I18N.tr(d.name) : d.name);     // 知らせる文に入れる名前（英語の画面では最初の4つを英語に）
+function marksOf(rec) {
+  if (!rec) return [];
+  const ids = Array.isArray(rec.marks) ? rec.marks : (rec.mark ? [rec.mark] : []);
+  return [...new Set(ids)].filter(id => markDef(id)).sort((a, b) => markIdx(a) - markIdx(b));
+}
+const markOf = (rec) => markDef(marksOf(rec)[0]);
+async function loadMarkDefs() {
+  try {
+    const m = await dbGet('meta', 'marks');
+    if (m && Array.isArray(m.defs) && m.defs.length) {
+      MARKDEFS = m.defs.filter(d => d && +d.id > 0).map(d => ({ id: +d.id, s: String(d.s || ''), name: String(d.name || ''), c: d.c || '#6b6b74' }));
+      // 最初の4つは消せない決まり。何かの拍子に欠けていたら戻す
+      MARK_DEFAULTS.forEach(d => { if (!markDef(d.id)) MARKDEFS.push({ ...d }); });
+      MARKNEXT = Math.max(+m.next || 0, ...MARKDEFS.map(d => d.id + 1));
+    }
+  } catch (e) { }
+  syncMarkMenu();
+}
+let markSaveT = null;
+function saveMarkDefs(now) {
+  clearTimeout(markSaveT);
+  const go = () => dbPut('meta', { key: 'marks', defs: MARKDEFS, next: MARKNEXT, updatedAt: nowISO() }).catch(() => toast('保存できませんでした'));
+  syncMarkMenu();
+  if (now) return go();
+  markSaveT = setTimeout(go, 400);
+}
+/* Mac版の「写真 › しるし」のメニューも、名前を変えたら作り直す */
+function syncMarkMenu() {
+  if (!NATIVE) return;
+  mbCall('marksMenu', { items: MARKDEFS.map((d, i) => ({ id: 'mark' + (i + 1), s: markSym(d), name: d.name, key: i < 9 ? String(i + 1) : '' })) }).catch(() => { });
+}
+function markChip(d) {
+  const sym = markSym(d);
+  const b = inspEl('i', 'mk' + (Array.from(sym).length > 1 ? ' two' : ''), sym);
+  b.style.setProperty('--mkc', d.c);
   return b;
 }
-/* 画像の id ごとに、しるしを付ける（mark：1〜4、0＝外す）。付けたしるしを返す */
-async function setMarks(ids, mark) {
+/* 写真の角に出す丸。3つより多いときは、2つと「+いくつ」 */
+function markBadge(rec) {
+  const ids = marksOf(rec);
+  if (!ids.length) return null;
+  const box = inspEl('span', 'mks');
+  const show = ids.length > 3 ? ids.slice(0, 2) : ids;
+  show.forEach(id => box.appendChild(markChip(markDef(id))));
+  if (ids.length > show.length) box.appendChild(inspEl('i', 'mk more', '+' + (ids.length - show.length)));
+  box.title = ids.map(id => markDef(id).name).join('・');
+  return box;
+}
+/* 「◎ 本命」のような名札の中身。名前は別の文字にしておく（英語の画面で、最初の4つの名前だけ訳されるように） */
+function markLabel(el, d, tail) {
+  el.append(markSym(d) + ' ', inspEl('span', '', d.name));
+  if (tail != null && tail !== '') el.append(' ' + tail);
+  return el;
+}
+/* 画像の id ごとに、しるしを付け外しする（markId：しるしの番号、0＝全部外す） */
+async function setMarks(ids, markId) {
   ids = [...new Set(ids)].filter(Boolean);
+  const d = markId ? markDef(markId) : null;
+  if (markId && !d) return toast('その番号のしるしはありません（「足す・変える」で足せます）', 2200);
   const recs = [];
   for (const id of ids) {
     const r = S.imgs.get(id) || STOCK.all.find(x => x.id === id) || await dbGet('images', id);
     if (r) recs.push(r);
   }
-  if (!recs.length) return 0;
-  const nv = mark && recs.every(r => (r.mark || 0) === mark) ? 0 : mark;
+  if (!recs.length) return;
+  const off = !d || recs.every(r => marksOf(r).includes(d.id));
   for (const r of recs) {
+    const next = !d ? [] : off ? marksOf(r).filter(x => x !== d.id) : [...marksOf(r), d.id];
+    next.sort((a, b) => markIdx(a) - markIdx(b));
     // 盤面とストックが別々に持っている同じ写真の記録も、そろえておく
     for (const c of new Set([r, S.imgs.get(r.id), STOCK.all.find(x => x.id === r.id)])) {
       if (!c) continue;
-      if (nv) c.mark = nv; else delete c.mark;
+      delete c.mark;
+      if (next.length) c.marks = next.slice(); else delete c.marks;
     }
   }
   await dbPutMany('images', recs);
   refreshMarks(new Set(recs.map(r => r.id)));
-  toast(nv ? MARKS[nv].s + ' ' + MARKS[nv].name + (recs.length > 1 ? '（' + recs.length + ' 枚）' : '') : 'しるしを外しました', 1400);
-  return nv;
+  const n = recs.length > 1 ? '（' + recs.length + ' 枚）' : '';
+  toast(!d ? 'しるしを外しました' + n : '「' + markName(d) + '」を' + (off ? '外しました' : '付けました') + n, 1400);
 }
-/* 画面に出ているしるしを付け直す */
+/* 画面に出ているしるしを付け直す（idset：写真の id。null なら全部＝しるしの名前や色を変えたとき） */
 function refreshMarks(idset) {
+  const hit = (id) => !idset || idset.has(id);
   canvas.querySelectorAll('.item.photo-item').forEach(el => {
     const it = S.items.find(i => i.id === el.dataset.id);
-    if (it && idset.has(it.imageId)) applyPhotoLook(el, it);
+    if (it && hit(it.imageId)) applyPhotoLook(el, it);
   });
   $$('#grid-scroll .gcell').forEach(cell => {
     const it = S.items.find(i => i.id === cell.dataset.id);
-    if (!it || !idset.has(it.imageId)) return;
-    const old = cell.querySelector(':scope > .mk'); if (old) old.remove();
+    if (!it || !hit(it.imageId)) return;
+    const old = cell.querySelector(':scope > .mks'); if (old) old.remove();
     const b = markBadge(S.imgs.get(it.imageId)); if (b) cell.appendChild(b);
   });
   $$('#stock-grid .scell').forEach(c => {
-    if (!idset.has(c.dataset.id)) return;
-    const old = c.querySelector(':scope > .mk'); if (old) old.remove();
+    if (!hit(c.dataset.id)) return;
+    const old = c.querySelector(':scope > .mks'); if (old) old.remove();
     const b = markBadge(STOCK.all.find(r => r.id === c.dataset.id)); if (b) c.appendChild(b);
   });
   if (!$('#viewer').hidden) syncViewerMarks();
   if (STOCK.on) renderStockFilters();
   if (!$('#sheet-stockmore').hidden) renderMarkRow($('#stockmore-marks'), stockSelRecs().map(r => r.id));
+  if (!$('#sheet-igpick').hidden) igPickFilters();
   if (!$('#inspector').hidden) renderInspector(true);
 }
-/* しるしの4つのボタン（右のパネル・ストックの「…」で使う）。ids：画像の id */
+/* しるしのボタンの並び（右のパネル・ストックの「…」で使う）。ids：画像の id。
+   選んだ全部に付いていれば塗り、一部だけなら点線 */
 function renderMarkRow(box, ids, after) {
   box.innerHTML = '';
   const row = inspEl('div', 'mark-row');
   const recs = ids.map(id => S.imgs.get(id) || STOCK.all.find(r => r.id === id)).filter(Boolean);
-  const cur = recs.length && recs.every(r => (r.mark || 0) === (recs[0].mark || 0)) ? (recs[0].mark || 0) : -1;
-  for (let k = 1; k < MARKS.length; k++) {
-    const m = MARKS[k];
-    const b = inspEl('button', 'mark-btn' + (cur === k ? ' on' : ''), m.s);
+  MARKDEFS.forEach((m, k) => {
+    const n = recs.filter(r => marksOf(r).includes(m.id)).length;
+    const b = inspEl('button', 'mark-btn' + (n && n === recs.length ? ' on' : n ? ' part' : ''), markSym(m));
     b.style.setProperty('--mkc', m.c);
-    b.title = m.name + '（' + k + '）';
+    b.title = k < 9 ? m.name + '（' + (k + 1) + '）' : m.name;
     b.appendChild(inspEl('span', '', m.name));
-    b.onclick = async () => { await setMarks(ids, k); if (after) after(); };
+    b.onclick = async () => { await setMarks(ids, m.id); if (after) after(); };
     row.appendChild(b);
-  }
+  });
+  const ed = inspEl('button', 'mark-btn mark-edit', '＋');
+  ed.title = 'しるしを足す・名前や色を変える';
+  ed.appendChild(inspEl('span', '', '足す・変える'));
+  ed.onclick = () => openMarkEditor();
+  row.appendChild(ed);
   box.appendChild(row);
 }
 function inspMarkBlock(body, list) {
   const ids = list.filter(isPhoto).map(it => it.imageId);
   if (!ids.length) return;
-  const s = inspSec(body, 'しるし', '1〜4キー・0で外す');
+  const s = inspSec(body, 'しるし', '1〜' + Math.min(9, MARKDEFS.length) + 'キー・0で外す');
   const box = inspEl('div');
   s.appendChild(box);
   renderMarkRow(box, ids);
 }
-/* キーで付ける（ボード）：選んでいる写真に */
+/* キーで付ける（ボード）：選んでいる写真に。n はキーの番号（上から何番目のしるしか） */
 function markKey(n) {
   const ids = keyTargets().filter(isPhoto).map(it => it.imageId);
-  if (!ids.length) return toast('写真を選んでから、1〜4 でしるしを付けます', 2200);
-  return setMarks(ids, n);
+  if (!ids.length) return toast('写真を選んでから、1〜' + Math.min(9, MARKDEFS.length) + ' でしるしを付けます', 2200);
+  return setMarks(ids, markIdAt(n));
 }
+
+/* ---- しるしを足す・変える ----
+   名前・記号（2文字まで。空なら名前の1文字目）・色を、打ったそばから全部の画面に反映する */
+function openMarkEditor() {
+  renderMarkEditor();
+  openSheet('#sheet-marks');
+}
+function renderMarkEditor(focusId) {
+  const box = $('#marks-list');
+  box.innerHTML = '';
+  MARKDEFS.forEach((d, k) => {
+    const row = inspEl('div', 'mked');
+    const head = inspEl('div', 'mked-head');
+    const pv = markChip(d); pv.classList.add('mked-pv');
+    const sym = inspEl('input', 'fld-input mked-sym'); sym.type = 'text'; sym.value = d.s; sym.maxLength = 2;
+    sym.placeholder = Array.from(d.name || '・')[0]; sym.title = '記号（2文字まで。空なら名前の1文字目）'; sym.setAttribute('aria-label', '記号');
+    const nm = inspEl('input', 'fld-input mked-name'); nm.type = 'text'; nm.value = d.name; nm.placeholder = '名前'; nm.setAttribute('aria-label', '名前');
+    const key = inspEl('span', 'mked-key', k < 9 ? String(k + 1) : '');
+    key.title = k < 9 ? (k + 1) + ' のキーで付け外し' : '';
+    const up = inspEl('button', 'mked-btn', '↑'); up.title = '上へ（キーの番号も変わります）'; up.disabled = k === 0;
+    const dn = inspEl('button', 'mked-btn', '↓'); dn.title = '下へ'; dn.disabled = k === MARKDEFS.length - 1;
+    const del = inspEl('button', 'mked-btn danger', '✕');
+    del.title = d.id <= 4 ? '最初の4つは消せません（名前や色は変えられます）' : 'このしるしを消す';
+    del.disabled = d.id <= 4;
+    let pvRef = pv;
+    const swap = () => { const fresh = markChip(d); fresh.classList.add('mked-pv'); pvRef.replaceWith(fresh); pvRef = fresh; };
+    sym.addEventListener('input', () => {
+      d.s = Array.from(sym.value.trim()).slice(0, 2).join('');
+      swap(); refreshMarks(null); saveMarkDefs();
+    });
+    nm.addEventListener('input', () => {
+      d.name = nm.value.trim().slice(0, 24);
+      sym.placeholder = Array.from(d.name || '・')[0];
+      swap(); refreshMarks(null); saveMarkDefs();
+    });
+    nm.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !imeKey(e)) { e.preventDefault(); nm.blur(); } });
+    up.onclick = () => { MARKDEFS.splice(k, 1); MARKDEFS.splice(k - 1, 0, d); saveMarkDefs(); refreshMarks(null); renderMarkEditor(); };
+    dn.onclick = () => { MARKDEFS.splice(k, 1); MARKDEFS.splice(k + 1, 0, d); saveMarkDefs(); refreshMarks(null); renderMarkEditor(); };
+    del.onclick = async () => {
+      if (d.id <= 4) return;
+      if (!await confirmAsk('「' + (d.name || markSym(d)) + '」のしるしを消しますか？ 付けてある写真からも外れます（写真は消えません）')) return;
+      MARKDEFS = MARKDEFS.filter(x => x !== d);
+      await saveMarkDefs(true);
+      refreshMarks(null);
+      renderMarkEditor();
+    };
+    head.append(pvRef, sym, nm, key, up, dn, del);
+    const cols = inspEl('div', 'mked-colors');
+    MARK_COLORS.forEach(c => {
+      const b = inspEl('button', 'mked-col' + (d.c.toLowerCase() === c ? ' on' : ''));
+      b.style.setProperty('--c', c); b.title = c; b.setAttribute('aria-label', c);
+      b.onclick = () => { d.c = c; cols.querySelectorAll('.mked-col').forEach(x => x.classList.toggle('on', x === b)); cp.value = c; swap(); refreshMarks(null); saveMarkDefs(); };
+      cols.appendChild(b);
+    });
+    // 一覧に無い色は、自由に選べる丸から
+    const cp = inspEl('input', 'mked-pick'); cp.type = 'color'; cp.value = /^#[0-9a-f]{6}$/i.test(d.c) ? d.c : '#6b6b74';
+    cp.title = 'ほかの色'; cp.setAttribute('aria-label', 'ほかの色');
+    cp.addEventListener('input', () => { d.c = cp.value; cols.querySelectorAll('.mked-col').forEach(x => x.classList.remove('on')); swap(); refreshMarks(null); saveMarkDefs(); });
+    cols.appendChild(cp);
+    row.append(head, cols);
+    box.appendChild(row);
+    if (focusId === d.id) setTimeout(() => { nm.focus(); nm.select(); }, 60);
+  });
+}
+$('#marks-add').onclick = () => {
+  const used = new Set(MARKDEFS.map(d => d.c));
+  const name = window.MB_I18N && MB_I18N.lang === 'en' ? 'New mark' : '新しいしるし';
+  const d = { id: MARKNEXT++, s: '', name, c: MARK_COLORS.find(c => !used.has(c)) || MARK_COLORS[(MARKDEFS.length * 5) % MARK_COLORS.length] };
+  MARKDEFS.push(d);
+  saveMarkDefs(true);
+  refreshMarks(null);
+  renderMarkEditor(d.id);
+  const list = $('#marks-list'); setTimeout(() => { list.lastElementChild && list.lastElementChild.scrollIntoView({ block: 'nearest' }); }, 80);
+};
+$('#marks-close').onclick = closeSheets;
 
 /* ==========================================================================
    1枚表示で前後へ（← →・左右にスワイプ）  2026-10-27
@@ -7405,9 +8075,19 @@ function viewerListFor(it) {
   }
   ph = S.mode === 'grid'
     ? ph.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || '') || (b.z || 0) - (a.z || 0))
-    : ph.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    : readingOrder(ph);
   return ph.map(i => i.id);
 }
+/* 1枚ずつ見る：ボードの写真を、読む順に1枚ずつ大きく。← → ・左右のスワイプで送り、見ながら しるし を付けられる。
+   写真を選んでいればそこから（いくつか選んでいれば、選んだものだけ）。選んでいなければ1枚目から */
+function openOneByOne() {
+  if (S.view !== 'board') return;
+  if (!S.items.some(i => i.imageId)) return toast('写真がありません');
+  let start = S.picking ? pickedItems().find(i => i.imageId) : selItem();
+  if (!start || !start.imageId) start = S.items.find(i => i.id === viewerListFor({})[0]);
+  if (start) openViewer(start);
+}
+$('#btn-oneby').onclick = openOneByOne;
 const viewerKey = () => viewerItem ? (viewerItem.stock ? 'img:' + viewerItem.imageId : viewerItem.id) : '';
 async function viewerStep(dir) {
   if (!viewerItem || VLIST.length < 2) return;
@@ -7427,23 +8107,31 @@ function syncViewerNav() {
   const many = VLIST.length > 1 && i >= 0;
   $('#viewer-prev').hidden = !many || i === 0;
   $('#viewer-next').hidden = !many || i === VLIST.length - 1;
-  return many ? (i + 1) + ' / ' + VLIST.length : '';
+  const pos = many ? (i + 1) + ' / ' + VLIST.length : '';
+  // 携帯は下の説明（何枚目か）を出す場所が無いので、右上に小さく
+  $('#viewer-count').textContent = pos; $('#viewer-count').hidden = !pos;
+  return pos;
 }
 function syncViewerMarks() {
   const box = $('#viewer-marks');
   if (!viewerItem) return;
   const rec = S.imgs.get(viewerItem.imageId) || STOCK.all.find(r => r.id === viewerItem.imageId);
-  const cur = (rec && rec.mark) || 0;
+  const cur = marksOf(rec);
   box.innerHTML = '';
-  for (let k = 1; k < MARKS.length; k++) {
-    const m = MARKS[k];
-    const b = inspEl('button', cur === k ? 'on' : '', m.s);
+  MARKDEFS.forEach((m, k) => {
+    const sym = markSym(m);
+    const b = inspEl('button', (cur.includes(m.id) ? 'on' : '') + (Array.from(sym).length > 1 ? ' two' : ''), sym);
     b.style.setProperty('--mkc', m.c);
-    b.title = m.name + '（' + k + '）';
-    b.onclick = (e) => { e.stopPropagation(); viewerMark(k); };
+    b.title = k < 9 ? m.name + '（' + (k + 1) + '）' : m.name;
+    b.onclick = (e) => { e.stopPropagation(); viewerMark(m.id); };
     box.appendChild(b);
-  }
+  });
+  const ed = inspEl('button', 'vm-edit', '＋');
+  ed.title = 'しるしを足す・変える';
+  ed.onclick = (e) => { e.stopPropagation(); openMarkEditor(); };
+  box.appendChild(ed);
 }
+/* n：しるしの番号（0＝全部外す） */
 async function viewerMark(n) {
   if (!viewerItem || !viewerItem.imageId) return;
   // 盤面とストックの記録が無ければ（ボードの写真をストックを開かずに見ているなど）、ここで読む
@@ -7526,7 +8214,7 @@ function shuffled(list, seed) {
 function sortStock(list) {
   switch (STOCK.sort) {
     case 'old': return list.slice().reverse();
-    case 'mark': return list.slice().sort((a, b) => ((a.mark || 9) - (b.mark || 9)));
+    case 'mark': { const rank = (r) => { const m = marksOf(r); return m.length ? markIdx(m[0]) : 999; }; return list.slice().sort((a, b) => rank(a) - rank(b)); }
     case 'color': return list.slice().sort((a, b) => colorRank(a) - colorRank(b));
     case 'random': return shuffled(list, STOCK.seed);
     case 'similar': {
@@ -8092,8 +8780,7 @@ function igPickList() {
   const words = IGP.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const inPlan = new Set(IG.plan.tiles.map(t => t.imageId));
   return STOCK.all.filter(r => {
-    if (IGP.filter === 'm1' && r.mark !== 1) return false;
-    if (IGP.filter === 'm2' && r.mark !== 2) return false;
+    if (IGP.filter.startsWith('mk:') && !marksOf(r).includes(+IGP.filter.slice(3))) return false;
     if (IGP.filter === 'out' && inPlan.has(r.id)) return false;
     const inf = STOCK.info.get(r.id);
     return words.every(w => inf && inf.text.includes(w));
@@ -8101,14 +8788,21 @@ function igPickList() {
 }
 /* しぼり込みを変えたときだけ作り直す。押して選ぶときは、印だけ付け替える
    （以前は押すたびに作り直していたので、下の方を選ぶと一覧の先頭へ戻ってしまった） */
-function igPickRender() {
+/* しぼり込みのボタン：すべて・この案にまだ無い・しるし（付いている写真があるものだけ） */
+function igPickFilters() {
   const fb = $('#igpick-filters');
   fb.innerHTML = '';
-  [['all', 'すべて'], ['out', 'この案にまだ無い'], ['m1', MARKS[1].s + ' ' + MARKS[1].name], ['m2', MARKS[2].s + ' ' + MARKS[2].name]].forEach(([v, l]) => {
-    const c = inspEl('button', 'chip' + (IGP.filter === v ? ' on' : ''), l);
+  const used = new Set(STOCK.all.flatMap(r => marksOf(r)));
+  if (IGP.filter.startsWith('mk:') && !used.has(+IGP.filter.slice(3))) used.add(+IGP.filter.slice(3));
+  [['all', 'すべて'], ['out', 'この案にまだ無い'], ...MARKDEFS.filter(d => used.has(d.id)).map(d => ['mk:' + d.id, d])].forEach(([v, l]) => {
+    const c = inspEl('button', 'chip' + (IGP.filter === v ? ' on' : ''), typeof l === 'string' ? l : '');
+    if (typeof l !== 'string') { markLabel(c, l); c.classList.add('mk-chip'); c.style.setProperty('--mkc', l.c); }
     c.onclick = () => { IGP.filter = v; IGP.limit = 240; igPickRender(); $('#igpick-grid').scrollTop = 0; };
     fb.appendChild(c);
   });
+}
+function igPickRender() {
+  igPickFilters();
   IGP.list = igPickList();
   const g = $('#igpick-grid');
   g.innerHTML = '';
@@ -8550,15 +9244,16 @@ async function drawSendGrid(ctx, W, H, cells, title, sub, cap) {
     ctx.font = '600 ' + Math.round(r * 1.15) + 'px -apple-system,"Hiragino Sans",sans-serif';
     ctx.fillText(String(no), px0 + r * 1.5, py0 + r * 1.55);
     // しるし（写真の右上）。送った相手にも、どれが本命か分かるように
-    const mk = it.imageId ? markOf(S.imgs.get(it.imageId) || STOCK.all.find(x => x.id === it.imageId)) : null;
-    if (mk) {
-      const mx = px0 + pw - r * 1.5, my = py0 + r * 1.5;
+    const mks = it.imageId ? marksOf(S.imgs.get(it.imageId) || STOCK.all.find(x => x.id === it.imageId)).slice(0, 3) : [];
+    mks.forEach((id, j) => {
+      const mk = markDef(id), sym = markSym(mk);
+      const mx = px0 + pw - r * 1.5 - j * r * 2.3, my = py0 + r * 1.5;
       ctx.fillStyle = mk.c; ctx.beginPath(); ctx.arc(mx, my, r, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1, r * 0.14); ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.font = '800 ' + Math.round(r * 1.2) + 'px -apple-system,"Hiragino Sans",sans-serif';
-      ctx.fillText(mk.s, mx, my + r * 0.05);
-    }
+      ctx.font = '800 ' + Math.round(r * (Array.from(sym).length > 1 ? 0.85 : 1.2)) + 'px -apple-system,"Hiragino Sans",sans-serif';
+      ctx.fillText(sym, mx, my + r * 0.05);
+    });
     const text = [it.note, (it.refs || []).join('・')].filter(Boolean).join('　');
     if (text) {
       ctx.fillStyle = '#333'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
@@ -8608,13 +9303,14 @@ async function makeSendFiles() {
   const portrait = SEND.orient === 'p' || (SEND.orient === 'auto' && kind === 'pages' && entries.every(i => i.h >= i.w));
   const land = SEND.orient === 'l' || (SEND.orient === 'auto' && kind === 'sheet' && entries.length >= 2) || (!portrait && kind === 'pages');
   const P = land ? { w: 297, h: 210 } : { w: 210, h: 297 };
-  const px = Math.round(P.w / 25.4 * PDF_DPI), py = Math.round(P.h / 25.4 * PDF_DPI);
+  const dpi = pdfDpi(P);
+  const px = Math.round(P.w / 25.4 * dpi), py = Math.round(P.h / 25.4 * dpi);
   const date = new Date().toLocaleDateString('ja-JP');
   progOpen('作っています');
   try {
     if (kind === 'image') {
-      // 横2400px。行の数に合わせて高さを決める
-      const W = 2400, n = entries.length;
+      // 横3200px（2026-10-30 まで2400px）。行の数に合わせて高さを決める
+      const W = 3200, n = entries.length;
       const cols = Math.max(1, Math.min(6, Math.round(Math.sqrt(n * 1.3))));
       const rows = Math.ceil(n / cols);
       const asp = entries.reduce((a, it) => a + it.h / Math.max(1, it.w), 0) / n;
@@ -8635,7 +9331,7 @@ async function makeSendFiles() {
       const c = document.createElement('canvas'); c.width = px; c.height = py;
       const sub = (total > 1 ? (p + 1) + ' / ' + total + '　' : '') + entries.length + ' 枚';
       await drawSendGrid(c.getContext('2d'), px, py, cells, title, sub, cap);
-      const blob = await canvasToBlob(c, 'image/jpeg', 0.88);
+      const blob = await canvasToBlob(c, 'image/jpeg', PDF_Q);
       pages.push({ jpg: new Uint8Array(await blob.arrayBuffer()), wPt: P.w * MM2PT, hPt: P.h * MM2PT, px, py });
       await new Promise(r => setTimeout(r, 0));
     }
