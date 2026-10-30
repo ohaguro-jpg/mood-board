@@ -4953,21 +4953,26 @@ async function openMoveSheet(bulk) {
   openSheet('#sheet-move');
 }
 
-async function moveItemTo(boardId) {
+async function moveItemTo(boardId, boardName) {
   const ids = mvBulk ? S.picked.slice() : (S.sel ? [S.sel] : []);
   if (!ids.length) return;
   closeSheets();
   pushHistory();
+  // 行き先では、いまある写真の下に、並び方はそのままで置く（以前は元の位置のままで、行き先の写真と重なっていた）
+  const moving = ids.map(id => S.items.find(i => i.id === id)).filter(Boolean);
+  const dest = (await dbByIndex('items', 'boardId', boardId)).filter(i => !i.trashedAt);
+  const gx = Math.min(...moving.map(i => i.x)), gy = Math.min(...moving.map(i => i.y));
+  const ox = dest.length ? Math.min(...dest.map(i => i.x)) - gx : -gx;
+  const oy = dest.length ? Math.max(...dest.map(i => i.y + i.h)) + gapPx() * 3 - gy : -gy;
   let n = 0;
-  for (const id of ids) {
-    const it = S.items.find(i => i.id === id);
-    if (!it) continue;
+  for (const it of moving) {
     if (mvMode === 'copy') {
-      const copy = { ...it, id: uid(), boardId, z: Date.now() % 100000 + n };
+      const copy = { ...it, id: uid(), boardId, x: Math.round(it.x + ox), y: Math.round(it.y + oy), z: Date.now() % 100000 + n };
       delete copy.trashedAt;
       await dbPut('items', copy);
     } else {
       it.boardId = boardId;
+      it.x = Math.round(it.x + ox); it.y = Math.round(it.y + oy);
       await dbPut('items', it);
       S.items = S.items.filter(i => i.id !== it.id);
       const el = itemEl(it.id); if (el) el.remove();
@@ -4984,8 +4989,19 @@ async function moveItemTo(boardId) {
   const b = await dbGet('boards', boardId);
   if (b) { b.updatedAt = nowISO(); await dbPut('boards', b); }
   touchBoard();
-  toast(n + ' 枚' + (mvMode === 'copy' ? 'コピーしました' : '移しました'));
+  toast(b && boardName ? n + ' 枚を新しいボード「' + b.name + '」に' + (mvMode === 'copy' ? 'コピーしました' : '移しました') + '<br>ホームから開けます'
+    : n + ' 枚' + (mvMode === 'copy' ? 'コピーしました' : '移しました'), boardName ? 3600 : 2400);
 }
+/* 新しいボードを作って、そこへ移す（写真が多くて重くなってきたボードを分ける） */
+$('#mv-new').onclick = async () => {
+  const n = mvBulk ? S.picked.length : (S.sel ? 1 : 0);
+  if (!n) return;
+  const name = await ask('新しいボードの名前（' + n + ' 枚を' + (mvMode === 'copy' ? 'コピー' : '移') + 'します）', (S.board ? S.board.name + ' ' : '') + T2('その2', 'part 2'));
+  if (name === null) return;
+  const b = { id: uid(), name: name.trim() || T2('無題のボード', 'Untitled board'), createdAt: nowISO(), updatedAt: nowISO() };
+  await dbPut('boards', b);
+  await moveItemTo(b.id, b.name);
+};
 
 /* --- 複数選択のときの操作 --- */
 $('#btn-bulk-move').onclick = openBulkMoveSheet;
@@ -5009,6 +5025,67 @@ async function duplicateItems(ids) {
   touchBoard();
   return copies.length;
 }
+
+/* ==========================================================================
+   真ん中に四角くまとめる  2026-10-30
+   選んだ写真を、いまのまとまりの真ん中を中心に、くっつけて四角に並べる（9枚なら3×3）。
+   ・幅をそろえ（まとまりの中ほどの幅）、できあがりが正方形に近くなる列の数を選ぶ
+   ・いま真ん中にある写真ほど真ん中に、外にある写真ほど外側に（位置関係をなるべく崩さない）
+   ・段の高さはその段でいちばん高い写真。低い写真は段の上下の真ん中に。最後の段が欠けるときは横の真ん中に寄せる
+   ========================================================================== */
+function gatherSquare(list, CX, CY) {
+  const n = list.length;
+  if (n < 2) return;
+  const ws = list.map(i => i.w).sort((a, b) => a - b);
+  const W = Math.round(ws[Math.floor(n / 2)]);
+  const g = Math.min(gapPx(), GAPS.tight);
+  list.forEach(i => { const r = i.h / Math.max(1, i.w); i.w = W; i.h = Math.round(W * r); });
+  const hs = list.map(i => i.h).sort((a, b) => a - b), H = hs[Math.floor(n / 2)];
+  // 正方形にいちばん近い列の数
+  let cols = 1, best = Infinity;
+  for (let c = 1; c <= n; c++) {
+    const rows = Math.ceil(n / c);
+    const d = Math.abs(Math.log((c * W + (c - 1) * g) / (rows * H + (rows - 1) * g)));
+    if (d < best) { best = d; cols = c; }
+  }
+  const rows = Math.ceil(n / cols);
+  // マス目：最後の段は欠けることがある。真ん中に近いマスから順に、いま真ん中に近い写真を入れる
+  const cells = [];
+  for (let r = 0; r < rows; r++) {
+    const inRow = r === rows - 1 ? n - cols * (rows - 1) : cols;
+    for (let c = 0; c < inRow; c++) cells.push({ r, c, inRow, d: Math.hypot((c - (inRow - 1) / 2) * W, (r - (rows - 1) / 2) * H) });
+  }
+  cells.sort((a, b) => a.d - b.d || a.r - b.r || a.c - b.c);
+  const byNear = [...list].sort((a, b) => Math.hypot(a.x + a.w / 2 - CX, a.y + a.h / 2 - CY) - Math.hypot(b.x + b.w / 2 - CX, b.y + b.h / 2 - CY));
+  byNear.forEach((it, k) => { it._cell = cells[k]; });
+  const rowH = new Array(rows).fill(0);
+  list.forEach(it => { rowH[it._cell.r] = Math.max(rowH[it._cell.r], it.h); });
+  const totalW = cols * W + (cols - 1) * g, totalH = rowH.reduce((a, b) => a + b, 0) + (rows - 1) * g;
+  const x0 = CX - totalW / 2, y0 = CY - totalH / 2;
+  list.forEach(it => {
+    const { r, c, inRow } = it._cell;
+    const rowX = x0 + (cols - inRow) * (W + g) / 2;            // 欠けた段は横の真ん中に
+    const top = y0 + rowH.slice(0, r).reduce((a, b) => a + b, 0) + r * g;
+    it.x = Math.round(rowX + c * (W + g));
+    it.y = Math.round(top + (rowH[r] - it.h) / 2);
+    delete it._cell;
+  });
+}
+/* ならべる › 真ん中に四角くまとめる：選んでいれば選んだもの、選んでいなければ全部（描いた線は動かさない） */
+$('#arr-square').onclick = async () => {
+  closeSheets();
+  const list = (S.picking && S.picked.length >= 2 ? pickedItems() : arrangeable()).filter(i => i.type !== 'draw' && !i.locked);
+  if (list.length < 2) return toast('2枚以上あるときに使えます');
+  pushHistory();
+  animateMoves();
+  const L = Math.min(...list.map(i => i.x)), R = Math.max(...list.map(i => i.x + i.w));
+  const T = Math.min(...list.map(i => i.y)), B = Math.max(...list.map(i => i.y + i.h));
+  gatherSquare(list, (L + R) / 2, (T + B) / 2);
+  list.forEach(updateItemEl);
+  await dbPutMany('items', list);
+  touchBoard();
+  toast(list.length + ' 枚を四角にまとめました', 1600);
+};
 
 /* ========================== そろえる =====================================
    選んだものを、きれいな位置関係に置き直す。
@@ -5066,6 +5143,8 @@ async function applyAlign(mode) {
     s.forEach(i => { i.y = Math.round(y); i.x = Math.round(CX - i.w / 2); y += i.h + gap; });
   } else if (mode === 'stack') {
     [...list].forEach((i, n) => { i.x = Math.round(L + n * 18); i.y = Math.round(T + n * 18); });
+  } else if (mode === 'square') {
+    gatherSquare(list, CX, CY);
   }
 
   list.forEach(updateItemEl);
@@ -7725,7 +7804,7 @@ function buildInspMany(body, list) {
     const grid = inspEl('div', 'insp-align');
     [['left', '左'], ['cx', '中央'], ['right', '右'], ['distx', '横に等間隔'],
      ['top', '上'], ['cy', '真ん中'], ['bottom', '下'], ['disty', '縦に等間隔'],
-     ['samew', '幅'], ['sameh', '高さ'], ['samearea', '面積'], ['row', '横一列'], ['col', '縦一列'], ['stack', '重ねる']]
+     ['samew', '幅'], ['sameh', '高さ'], ['samearea', '面積'], ['row', '横一列'], ['col', '縦一列'], ['stack', '重ねる'], ['square', '四角にまとめる']]
       .forEach(([m, l]) => grid.appendChild(inspChip(l, false, () => applyAlign(m))));
     s.appendChild(grid);
   }

@@ -158,6 +158,13 @@
     '範囲を囲んで PDF・画像に': 'Capture an area as PDF / image', 'ドラッグで囲んだところだけを、高い画質で': 'Only the part you drag a box around, in high quality',
     '範囲を囲む': 'Drag an area', 'ドラッグで囲む': 'Drag a box', 'ドラッグで囲み直せる': 'Drag again to redo', '画像で保存': 'Save image',
     'PDF や画像にしたいところを、ドラッグで囲んでください': 'Drag a box around the part you want as a PDF or image',
+    // うつす：新しいボードを作って入れる／真ん中に四角くまとめる（2026-10-30）
+    '新しいボードを作って入れる': 'Put into a new board', '写真が多くて重くなってきたボードを分けるときに': 'Handy for splitting a board that has grown heavy',
+    '新しいボードの名前（{n} 枚を移します）': 'Name the new board ({n} will be moved)', '新しいボードの名前（{n} 枚をコピーします）': 'Name the new board ({n} will be copied)',
+    '{n} 枚を新しいボード「{q}」に移しました': 'Moved {n} to the new board “{q}”', '{n} 枚を新しいボード「{q}」にコピーしました': 'Copied {n} to the new board “{q}”', 'ホームから開けます': 'Open it from Home',
+    '四角にまとめる': 'Square', '真ん中に四角くまとめる': 'Gather into a square',
+    '選んだ写真（選んでいなければ全部）を、真ん中を中心に くっつけて四角に。9枚なら3×3': 'Packs the selected photos (or all of them) into a square around the middle — 3×3 for 9 photos',
+    '{n} 枚を四角にまとめました': 'Gathered {n} into a square', '2枚以上あるときに使えます': 'Needs 2 or more',
     // ボードの「さがす」でしるしを選ぶ（2026-10-30）
     'メモ・文字・タグ・しるしの名前で検索': 'Search notes, text, tags and mark names', '押すと、そのしるしの写真だけに（いくつ選んでも）': 'Tap to show only photos with that mark (pick any number)',
     'しるし無し {n}': 'No mark {n}', 'まだしるしを付けていない写真': 'Photos without a mark yet', '見つかったものをえらぶ': 'Select found',
