@@ -1710,6 +1710,8 @@ function scalePickBadges() {
 function setDock(which) {
   // 描いている間は、何をしても描くときのドックのまま
   if (typeof DRAW !== 'undefined' && DRAW.on) which = 'draw';
+  // 範囲を囲んでいる途中でほかの操作に移ったら、囲むのをやめる（ボードを出ても囲むままで、盤面を動かせなくなっていた）
+  if (which !== 'area' && typeof AREA !== 'undefined' && AREA.on) { AREA.on = false; AREA.rect = null; const ab = $('#area-box'); if (ab) ab.remove(); }
   $('#board-dock').hidden = which !== 'board';
   $('#select-dock').hidden = which !== 'select';
   $('#item-dock').hidden = which !== 'item';
@@ -2202,6 +2204,7 @@ function richText(root) {
 function fillRich(el, it) {
   if (it.rich) el.replaceChildren(richFrag(it.rich)); else el.textContent = it.text || '';
   el.classList.add('rich');
+  el.setAttribute('translate', 'no');      // 書いた言葉は英語の画面でも訳さない
 }
 const memoPaper = (it, style) => { const cc = it && cardColors(it); return cc ? cc.bg : ((it ? it.style : style) === 'bubble' ? '#ffffff' : '#f4ecd0'); };
 const memoInk = (it, style) => { const cc = it && cardColors(it); return cc ? cc.fg : ((it ? it.style : style) === 'bubble' ? '#18181b' : '#2a2415'); };
@@ -2425,11 +2428,17 @@ async function memoSave(final) {
 }
 /* メモの高さを中身に合わせる。shrink：中身より大きければ縮めもする（書いたばかりのメモ・ひな形）。変えたら true */
 function fitTextHeight(it, shrink) {
-  const el = itemEl(it.id), nb = el && el.querySelector('.note-body');
-  if (!nb) return false;
+  // 盤面の外で、同じ幅に組んで高さを測る（グリッド表示のあいだは盤面が隠れていて、測ると 0 になっていた）
+  const host = document.createElement('div');
+  host.className = 'item text-item' + (it.style === 'bubble' ? ' bubble' : '');
+  host.style.cssText = 'position:absolute;left:-100000px;top:0;visibility:hidden;transform:none;width:' + it.w + 'px;height:10px';
+  const nb = document.createElement('div'); nb.className = 'note-body';
   nb.style.bottom = 'auto';
+  fillRich(nb, it);
+  host.appendChild(nb); document.body.appendChild(host);
   const need = Math.ceil(nb.scrollHeight);
-  nb.style.bottom = '';
+  host.remove();
+  if (!need) return false;
   const nh = shrink ? Math.max(it.style === 'bubble' ? 56 : 48, need) : Math.max(it.h, need);
   if (Math.abs(nh - it.h) <= 1) return false;
   it.h = Math.min(6000, nh);
@@ -2444,6 +2453,7 @@ async function closeMemo() {
   const it = MEMO.it;
   MEMO.it = null; MEMO.fresh = false; MEMO.range = null;
   $('#memo-body').blur();
+  if (S.view === 'board' && S.mode === 'grid') renderGrid();     // グリッド表示のときは、並びの方も書き直す
   if (it && !it.trashedAt && S.view === 'board') selectItem(it.id);
 }
 (() => {
@@ -6215,7 +6225,9 @@ function updateHires() {
     if (px > THUMB_EDGE * 1.1) want.push({ id: it.id, px });
   }
   want.sort((a, b) => b.px - a.px);
-  const keep = new Set(want.slice(0, 40).map(w => w.id));
+  // 携帯はメモリが少ないので、同時に大きくするのは12枚まで
+  const cap = (window.matchMedia && matchMedia('(pointer:coarse)').matches) || innerWidth < 760 ? 12 : 40;
+  const keep = new Set(want.slice(0, cap).map(w => w.id));
   const byId = new Map(S.items.map(i => [i.id, i]));
   canvas.querySelectorAll('.item.photo-item').forEach(el => {
     const im = el.querySelector(':scope > img.fx');
@@ -6890,6 +6902,7 @@ async function showSlide() {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const c = await renderPhotoCanvas(it, w * dpr, h * dpr);
     if (!PR || PR.list[PR.i] !== it) return;      // 速くめくったとき、古い1枚を出さない
+    if (c) drawPinsOnCanvas(c.getContext('2d'), it, 0, 0, c.width, c.height);   // 写真への書き込みの番号も
     if (c) { c.className = 'pr-photo'; c.style.width = w + 'px'; c.style.height = h + 'px'; st.appendChild(c); }
   } else {
     const c = document.createElement('canvas');
@@ -8317,6 +8330,9 @@ function renderMarkEditor(focusId) {
       if (!await confirmAsk('「' + (d.name || markSym(d)) + '」のしるしを消しますか？ 付けてある写真からも外れます（写真は消えません）')) return;
       MARKDEFS = MARKDEFS.filter(x => x !== d);
       await saveMarkDefs(true);
+      // そのしるしで絞り込んでいたら、絞り込みを外す（消したしるしのボタンが無くなり、戻せなくなっていた）
+      if (STOCK.filter === 'mark:' + d.id) { STOCK.filter = 'all'; if (STOCK.on) applyStockFilter(); }
+      if (typeof IGP !== 'undefined' && IGP.filter === 'mk:' + d.id) IGP.filter = 'all';
       refreshMarks(null);
       renderMarkEditor();
     };

@@ -1365,6 +1365,13 @@ body.at-home #app-title{font-size:.78rem;font-weight:700;letter-spacing:.24em}
 .viewer-tools{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;min-width:0;flex:0 1 auto}
 .viewer-tools::-webkit-scrollbar{display:none}
 .viewer-tools .cmp-btn{flex:0 0 auto}
+/* 「とじる」「保存」はつぶさない（携帯で道具が増えて、1文字ずつ縦に折れていた） */
+#viewer-bar > .cmp-btn{flex:0 0 auto;white-space:nowrap}
+.viewer-tools .cmp-btn{white-space:nowrap}
+/* 携帯：道具の列は横にずらせる。右端を薄くして、続きがあると分かるように */
+@media (max-width:760px){
+  .viewer-tools{-webkit-mask-image:linear-gradient(to right,#000 82%,transparent);mask-image:linear-gradient(to right,#000 82%,transparent);padding-right:24px}
+}
 #viewer-bar .cmp-btn.on{background:#fff;color:#111}
 @media (max-width:760px){ #viewer-meta{display:none} }
 #viewer-guide{position:absolute;pointer-events:none;overflow:visible}
@@ -1545,7 +1552,7 @@ body.at-home #app-title{font-size:.78rem;font-weight:700;letter-spacing:.24em}
 #viewer-stage #viewer-video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
 /* 動画を見ているときは、写真用の道具を出さない */
 #viewer.is-video #viewer-rotate,#viewer.is-video #viewer-crop,#viewer.is-video #viewer-uncrop,#viewer.is-video #viewer-colors,
-#viewer.is-video #viewer-eyedrop,#viewer.is-video #viewer-guide-btn,#viewer.is-video #viewer-info-btn{display:none!important}
+#viewer.is-video #viewer-eyedrop,#viewer.is-video #viewer-guide-btn,#viewer.is-video #viewer-info-btn,#viewer.is-video #viewer-pin-btn{display:none!important}
 
 /* ==========================================================================
    しるし（◎ ○ △ ✕）・ストックの並べ替えと絞り込み・1枚表示で前後へ（2026-10-27）

@@ -437,8 +437,12 @@
       }
     }
   }
+  // 書いた人の言葉（メモの中身など）は訳さない。translate="no" の入れ物の中は触らない
+  // （書式つきのメモは1行ずつ別の文字の塊になるので、「光」「色」だけの行が辞書に当たって英語に変わっていた）
+  const mine = (n) => { const e = n.nodeType === 1 ? n : n.parentElement; return !!(e && e.closest && e.closest('[translate="no"]')); };
   function walk(root) {
     if (!root) return;
+    if (mine(root)) return;
     if (root.nodeType === 3) return applyText(root);
     if (root.nodeType !== 1) return;
     if (root.tagName === 'SCRIPT' || root.tagName === 'STYLE' || root.isContentEditable) return;
@@ -447,6 +451,7 @@
       acceptNode: (n) => {
         // 打った文字（テキストエリアの中身）は訳さない。ただし薄い案内（placeholder）は訳す（以前は案内まで日本語のままだった）
         if (n.nodeType === 1 && n.tagName === 'TEXTAREA') { applyAttrs(n); return NodeFilter.FILTER_REJECT; }
+        if (n.nodeType === 1 && n.getAttribute('translate') === 'no') return NodeFilter.FILTER_REJECT;
         return (n.nodeType === 1 && (n.tagName === 'SCRIPT' || n.tagName === 'STYLE' || n.isContentEditable))
           ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
       },
@@ -459,7 +464,7 @@
     mo = new MutationObserver((list) => {
       mo.disconnect();
       for (const m of list) {
-        if (m.type === 'characterData') applyText(m.target);
+        if (m.type === 'characterData') { if (!mine(m.target)) applyText(m.target); }
         else if (m.type === 'attributes') applyAttrs(m.target);
         else m.addedNodes.forEach(walk);
       }
