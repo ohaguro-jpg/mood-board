@@ -158,6 +158,10 @@
     '範囲を囲んで PDF・画像に': 'Capture an area as PDF / image', 'ドラッグで囲んだところだけを、高い画質で': 'Only the part you drag a box around, in high quality',
     '範囲を囲む': 'Drag an area', 'ドラッグで囲む': 'Drag a box', 'ドラッグで囲み直せる': 'Drag again to redo', '画像で保存': 'Save image',
     'PDF や画像にしたいところを、ドラッグで囲んでください': 'Drag a box around the part you want as a PDF or image',
+    // ボードの「さがす」でしるしを選ぶ（2026-10-30）
+    'メモ・文字・タグ・しるしの名前で検索': 'Search notes, text, tags and mark names', '押すと、そのしるしの写真だけに（いくつ選んでも）': 'Tap to show only photos with that mark (pick any number)',
+    'しるし無し {n}': 'No mark {n}', 'まだしるしを付けていない写真': 'Photos without a mark yet', '見つかったものをえらぶ': 'Select found',
+    '{n} つ えらびました': 'Selected {n}', 'くらべる・送る・1枚ずつ見る などに使えます': 'Compare, send or view them one by one', '見つかったものがありません': 'Nothing found',
     // 保存した絞り込み・写真への書き込み・ひな形（2026-10-30）
     '＋ この絞り込みを保存': '＋ Save this filter', 'いまの しるし・タグ・色・形・並び・さがす言葉 を、名前を付けて保存します': 'Save the current marks, tags, color, shape, order and search words under a name',
     'この絞り込みの名前（ストックのいちばん上に並びます）': 'Name this filter (it appears at the top of Stock)', 'この絞り込みを消す': 'Delete this filter',

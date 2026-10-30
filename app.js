@@ -815,7 +815,7 @@ async function openBoard(id) {
   }
   S.view = 'board';
   S.sel = null; S.picking = false; S.picked = [];
-  S.filter = { q: '', hue: null };
+  S.filter = { q: '', hue: null, marks: [] };
   // 前のボードの「描く」・右のパネル・選ぶドックを片付ける（⌥⌘→ などで直接移ると、前のボードの中身が残っていた）
   quitDrawing();
   setDock('board');
@@ -1101,14 +1101,23 @@ function makeItemEl(it) {
 }
 
 /* ========================== さがす（メモ・文字・タグ・色） ================ */
+const filterOn = () => !!(S.filter.q || S.filter.hue != null || (S.filter.marks || []).length);
 function itemMatchesFilter(it) {
   const f = S.filter;
-  if (!f.q && f.hue == null) return true;
+  if (!filterOn()) return true;
   let ok = true;
-  if (f.q) {
+  // しるし（いくつ選んでも、どれか1つが付いていれば。0＝しるし無し）。しるしで絞るときは写真だけ
+  if (f.marks && f.marks.length) {
+    if (!it.imageId) return false;
+    const m = marksOf(S.imgs.get(it.imageId));
+    ok = f.marks.some(id => id === 0 ? !m.length : m.includes(id));
+  }
+  if (ok && f.q) {
+    const rec = it.imageId ? S.imgs.get(it.imageId) : null;
     const hay = ((it.note || '') + ' ' + (it.desc || '') + ' ' + (it.text || '') + ' '
                  + ((it.tags || []).join(' ')) + ' ' + (it.section || '') + ' ' + ((it.refs || []).join(' ')) + ' '
-                 + (it.title || '') + ' ' + ((it.rows || []).map(r => r.t).join(' '))).toLowerCase();
+                 + (it.title || '') + ' ' + ((it.rows || []).map(r => r.t).join(' ')) + ' '
+                 + marksOf(rec).map(id => markDef(id).name).join(' ')).toLowerCase();
     ok = hay.includes(f.q.toLowerCase());
   }
   if (ok && f.hue != null) {
@@ -1122,7 +1131,7 @@ function itemMatchesFilter(it) {
   return ok;
 }
 function applyFilter() {
-  const active = !!(S.filter.q || S.filter.hue != null);
+  const active = filterOn();
   let hit = 0;
   canvas.querySelectorAll('.item').forEach(el => {
     const it = S.items.find(i => i.id === el.dataset.id);
@@ -1137,6 +1146,8 @@ function applyFilter() {
   });
   const cnt = $('#search-count');
   if (cnt) cnt.textContent = active ? (hit + ' / ' + S.items.length + ' まいに一致') : '';
+  const pk = $('#search-pick');
+  if (pk) pk.disabled = !active || !hit;
 }
 
 function itemEl(id) { return canvas.querySelector('.item[data-id="' + id + '"]'); }
@@ -3117,8 +3128,35 @@ function renderSearchColors() {
     box.appendChild(s);
   });
 }
+/* しるしで絞る：このボードの写真に付いている数も出す。最後に「しるし無し」（まだ分けていない写真を思い出す用） */
+function renderSearchMarks() {
+  const box = $('#search-marks');
+  if (!box) return;
+  box.innerHTML = '';
+  const sel = S.filter.marks || (S.filter.marks = []);
+  const photos = S.items.filter(it => it.imageId);
+  const count = (id) => photos.filter(it => { const m = marksOf(S.imgs.get(it.imageId)); return id === 0 ? !m.length : m.includes(id); }).length;
+  const toggle = (id) => {
+    const i = sel.indexOf(id);
+    if (i >= 0) sel.splice(i, 1); else sel.push(id);
+    renderSearchMarks(); applyFilter();
+  };
+  MARKDEFS.forEach(d => {
+    const n = count(d.id), on = sel.includes(d.id);
+    const c = inspEl('button', 'chip mk-chip' + (on ? ' on' : '') + (n || on ? '' : ' zero'));
+    markLabel(c, d, n);
+    c.style.setProperty('--mkc', d.c);
+    c.onclick = () => toggle(d.id);
+    box.appendChild(c);
+  });
+  const c0 = inspEl('button', 'chip' + (sel.includes(0) ? ' on' : ''), 'しるし無し ' + count(0));
+  c0.title = 'まだしるしを付けていない写真';
+  c0.onclick = () => toggle(0);
+  box.appendChild(c0);
+}
 $('#btn-search').onclick = () => {
   $('#search-input').value = S.filter.q;
+  renderSearchMarks();
   renderSearchColors();
   applyFilter();
   openSheet('#sheet-search');
@@ -3126,10 +3164,21 @@ $('#btn-search').onclick = () => {
 };
 $('#search-input').oninput = (e) => { S.filter.q = e.target.value.trim(); applyFilter(); };
 $('#search-clear').onclick = () => {
-  S.filter = { q: '', hue: null };
+  S.filter = { q: '', hue: null, marks: [] };
   $('#search-input').value = '';
+  renderSearchMarks();
   renderSearchColors();
   applyFilter();
+};
+/* 見つかったものを、まとめて選ぶ（そのまま くらべる・送る・1枚ずつ見る・うつす などへ） */
+$('#search-pick').onclick = () => {
+  const hits = S.mode === 'grid' ? S.items.filter(itemMatchesFilter) : readingOrder(S.items.filter(itemMatchesFilter));
+  if (!hits.length) return toast('見つかったものがありません');
+  closeSheets();
+  startPicking(true);
+  hits.forEach(it => S.picked.push(it.id));
+  updatePickUI();
+  toast(hits.length + ' つ えらびました<br>くらべる・送る・1枚ずつ見る などに使えます', 2800);
 };
 $('#search-close').onclick = closeSheets;
 $('#btn-arrange').onclick = () => {
@@ -8247,6 +8296,8 @@ function refreshMarks(idset) {
   });
   if (!$('#viewer').hidden) syncViewerMarks();
   if (STOCK.on) renderStockFilters();
+  if (S.view === 'board' && filterOn()) applyFilter();             // しるしで絞っているときは、付け外しをすぐ反映
+  if (!$('#sheet-search').hidden) renderSearchMarks();
   if (!$('#sheet-stockmore').hidden) renderMarkRow($('#stockmore-marks'), stockSelRecs().map(r => r.id));
   if (!$('#sheet-igpick').hidden) igPickFilters();
   if (!$('#inspector').hidden) renderInspector(true);

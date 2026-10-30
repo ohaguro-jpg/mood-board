@@ -1335,11 +1335,15 @@
 <div class="sheet tall" id="sheet-search" hidden>
   <div class="sheet-grab"></div>
   <h2>さがす</h2>
-  <input type="text" id="search-input" placeholder="メモ・文字・タグで検索" autocomplete="off">
+  <input type="text" id="search-input" placeholder="メモ・文字・タグ・しるしの名前で検索" autocomplete="off">
+  <label class="fld-label">しるし<i class="fld-hint">押すと、そのしるしの写真だけに（いくつ選んでも）</i></label>
+  <div id="search-marks" class="tag-row"></div>
+  <label class="fld-label">色</label>
   <div id="search-colors"></div>
   <p class="sheet-note" id="search-count"></p>
   <div class="sheet-actions">
     <button class="row-btn ghost" id="search-clear">クリア</button>
+    <button class="row-btn" id="search-pick" disabled>見つかったものをえらぶ</button>
     <button class="row-btn solid" id="search-close">とじる</button>
   </div>
 </div>

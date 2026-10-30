@@ -21,6 +21,14 @@
    ・画面が眠らないようにする（Wake Lock）。タブの題名に進み具合・止まっていること・できたことを出す
    ・件数に届いていないうちは、粘ってから終える
    ・途中までの分をこのページ（Pinterest 側）に覚えておき、もう一度実行すると前回の分と合わせる（3日間）
+
+   2026-10-30（本人「まだ全部取れない」）
+   ・Pinterest の画像は、大きさ（originals・736x…）と拡張子（.jpg・.png）の組み合わせによって「ある・無い（403）」が写真ごとに違う。
+     これまでは1枚につき1つのURLしか試さず、無ければ捨てていた → 大きい順に別の大きさ・拡張子も試す。通信の失敗はもう一度
+   ・同じ写真の .png と .jpg を別の写真と数え、件数に届いたと思って早く終わることがあった → 拡張子を除いた名前で1枚と数える
+   ・動画のピンの表紙（video の poster）も拾う
+   ・件数に足りないまま終わりそうなら、上からもう一度ゆっくり見直す
+   ・最後に「取れなかった理由」を出す。小さい画像しか無かった写真の数も
    ========================================================================== */
 (async () => {
   // 動作確認用（Pinterestに似せた偽のページで試すとき）。ふだんは使わない
@@ -136,29 +144,31 @@
   if (!prev || !prev.groups || Date.now() - (prev.t || 0) > 3 * 864e5) prev = null;
   const prevUrls = (name) => { const g = prev && prev.groups.find(x => x.name === name); return g ? g.urls : []; };
   const saveProgress = (groups) => {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ t: Date.now(), groups: groups.map(g => ({ name: g.name, urls: g.urls })) })); } catch (e) { }
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ t: Date.now(), groups: groups.map(g => ({ name: g.name, urls: g.urls.map(p => asPick(p)[0]) })) })); } catch (e) { }
   };
   // 同じ写真の大きさ違い（236x・736x・originals）を1つに数えるための名前（URLの最後のファイル名）
-  const picKey = (u) => { try { return new URL(u).pathname.split('/').pop() || u; } catch (e) { return u; } };
-  const mergeUrls = (a, b) => { const seen = new Set(), out = []; for (const u of [...a, ...b]) { const k = picKey(u); if (!seen.has(k)) { seen.add(k); out.push(u); } } return out; };
+  // 拡張子も除く（originals は .png、736x は .jpg のように、同じ写真でも拡張子が違うことがある）
+  const picKey = (u) => { try { return (new URL(u).pathname.split('/').pop() || u).replace(/\.(jpe?g|png|gif|webp|avif)$/i, ''); } catch (e) { return u; } };
+  // 1枚の写真は「候補のURLの並び（大きい順）」で持つ。前回の分（URLだけ）もそのまま混ぜられる
+  const asPick = (p) => Array.isArray(p) ? p : [p];
+  const mergeUrls = (a, b) => { const seen = new Set(), out = []; for (const p of [...a, ...b].map(asPick)) { const k = picKey(p[0]); if (!seen.has(k)) { seen.add(k); out.push(p); } } return out; };
 
   /* ---------- 見つけ方 ---------- */
-  const STOP_WORDS = /他のアイデア|関連(する)?(ピン|アイデア)|おすすめ|さらに表示|More (ideas|like this)|Related|You might also like/i;
+  const STOP_WORDS = /他のアイデア|関連(する)?(ピン|アイデア)|おすすめ|さらに表示|アイデアをもっと|似(ている|た)(ピン|アイデア)|もっと見つける|More (ideas|like this|to explore)|Find (more|some) ideas|Explore more|Related|You might also like/i;
   const isPinImg = (u) => T ? T.isImg(u)
     : (/i\.pinimg\.com/.test(u) && !/\/(30x30|60x60|75x75|140x140)\//.test(u));
 
-  // いちばん大きい画像のURL（srcset があればその中の最大）
-  const bestSrc = (img) => {
-    let best = img.currentSrc || img.src || '';
-    if (img.srcset) {
-      let bw = 0;
-      img.srcset.split(',').forEach(s => {
-        const p = s.trim().split(/\s+/);
-        const n = parseFloat(p[1]) || 1;
-        if (p[0] && n >= bw) { bw = n; best = p[0]; }
-      });
-    }
-    return best;
+  // 画像のURLの候補を大きい順に（srcset の全部と、いま出ているもの）。いちばん上が無くても、次を試せるように
+  const srcCands = (img) => {
+    const list = [];
+    if (img.srcset) img.srcset.split(',').forEach(s => {
+      const p = s.trim().split(/\s+/);
+      if (p[0]) list.push({ u: p[0], n: parseFloat(p[1]) || 1 });
+    });
+    list.sort((a, b) => b.n - a.n);
+    const out = list.map(x => x.u);
+    for (const u of [img.currentSrc, img.src]) if (u && !out.includes(u)) out.push(u);
+    return out;
   };
 
   // スクロールしている箱を探す。画面全体とは限らないので、ピンをいちばん多く抱えている箱を選ぶ
@@ -236,7 +246,13 @@
     const atBottom = () => top() + viewH() >= scroller.scrollHeight - 6;
     const scrollTo = (y) => isRoot ? win.scrollTo(0, y) : (scroller.scrollTop = y);
 
-    const urls = new Set();
+    const urls = new Map();       // 写真の名前 → 候補のURL（大きい順）
+    const addPick = (cands) => {
+      const k = picKey(cands[0]);
+      const cur = urls.get(k);
+      if (!cur) urls.set(k, cands.slice());
+      else cands.forEach(u => { if (!cur.includes(u)) cur.push(u); });
+    };
     let stopY = null, firstPinY = null;
 
     const findStopY = () => {
@@ -255,12 +271,13 @@
     const grab = () => {
       const s = findStopY();
       if (s != null && (stopY == null || s < stopY)) stopY = s;
-      doc.querySelectorAll('a[href*="/pin/"] img').forEach(img => {
-        const y = yOf(img);
+      // 動画のピンは img が無く、video の表紙（poster）だけのことがある
+      doc.querySelectorAll('a[href*="/pin/"] img, a[href*="/pin/"] video[poster]').forEach(el => {
+        const y = yOf(el);
         if (firstPinY == null || y < firstPinY) firstPinY = y;
         if (stopY != null && y > stopY) return;           // おすすめの見出しより下は取らない
-        const u = bestSrc(img);
-        if (u && isPinImg(u)) urls.add(u);
+        const cands = (el.tagName === 'VIDEO' ? [el.poster] : srcCands(el)).filter(u => u && isPinImg(u));
+        if (cands.length) addPick(cands);
       });
     };
 
@@ -269,7 +286,7 @@
       if (await whileHidden()) { stall = 0; refind(); }                        // 隠れていた間の「増えない」は数えない
       grab();
       // 途中で閉じてしまっても、もう一度実行したときに合わせられるよう、ときどき覚えておく
-      if (gname != null && urls.size - savedAt >= 40) { savedAt = urls.size; saveProgress([...groups, { name: gname, urls: mergeUrls([...urls], prevUrls(gname)) }]); }
+      if (gname != null && urls.size - savedAt >= 40) { savedAt = urls.size; saveProgress([...groups, { name: gname, urls: mergeUrls([...urls.values()], prevUrls(gname)) }]); }
       sub.textContent = label + '：' + urls.size + ' 枚みつかりました' + (declared ? '（ボードのピン ' + declared + ' 件）' : '') + (prev ? '・前回の分と合わせます' : '');
       progressTitle = '集めています ' + urls.size + (declared ? ' / ' + declared : '');
       setTitle(progressTitle);
@@ -292,7 +309,23 @@
       if (++rounds > 3000) break;
     }
     grab();
-    return [...urls];
+    // 件数に足りないまま終わりそうなら、上からもう一度ゆっくり見直す（速く流したときに、読み込みが間に合わなかった分を拾う）
+    if (!stopped && declared && urls.size < declared) {
+      const before = urls.size;
+      sub.textContent = label + '：' + urls.size + ' / ' + declared + ' 枚。足りない分を見直しています…';
+      scrollTo(0); await sleep(1500);
+      for (let k = 0; k < 2000 && !stopped; k++) {
+        if (await whileHidden()) refind();
+        grab();
+        if (urls.size >= declared) break;
+        if (stopY != null && top() > stopY) break;
+        if (atBottom()) { await sleep(1500); grab(); break; }
+        scrollTo(top() + viewH() * 0.5);
+        await sleep(1100);
+      }
+      console.log('MOOD BOARD: 見直しで ' + (urls.size - before) + ' 枚ふえました（' + label + '）');
+    }
+    return [...urls.values()];
   }
 
   /* ---------- セクションは、見えない枠の中で1つずつ開いて集める ---------- */
@@ -342,7 +375,7 @@
 
   // 同じ写真は1回だけ（大きさ違いも1つ）。並びはボード → セクションの順
   const seen = new Set(), list = [];
-  for (const g of groups) for (const u of g.urls) { const k = picKey(u); if (!seen.has(k)) { seen.add(k); list.push({ url: u, section: g.name }); } }
+  for (const g of groups) for (const p of g.urls.map(asPick)) { const k = picKey(p[0]); if (!seen.has(k)) { seen.add(k); list.push({ cands: p, url: p[0], section: g.name }); } }
   let trimmed = 0;
   if (!sections.length && declared && list.length > declared) { trimmed = list.length - declared; list.length = declared; }
   if (!list.length) { finish(); msg.textContent = '写真が見つかりませんでした'; sub.textContent = report(); return; }
@@ -358,18 +391,58 @@
   const TYPE = canWebp ? 'image/webp' : 'image/jpeg';
   const EXT = canWebp ? 'webp' : 'jpg';
 
+  // Pinterest の画像の、ほかの大きさ・拡張子のURL（大きい順）。https://i.pinimg.com/736x/aa/bb/cc/名前.jpg の形のときだけ
+  const SIZES = ['originals', '1200x', '736x', '564x', '474x', '236x'];
+  function variantsOf(u) {
+    const m = /^(https:\/\/i\.pinimg\.com\/)(originals|\d+x(?:\d+)?)\/(.+)\.(jpe?g|png|gif|webp)$/i.exec(u || '');
+    if (!m) return [];
+    const [, host, , path, ext] = m, out = [];
+    for (const sz of SIZES) for (const e of (sz === 'originals' ? [ext, 'jpg', 'png', 'gif', 'webp'] : ['jpg'])) out.push(host + sz + '/' + path + '.' + e.toLowerCase());
+    return out;
+  }
+  const isSmall = (u) => /\/(236x|474x)\//.test(u || '');
+  const why = { gone: 0, net: 0, decode: 0 };
+  let smallOnly = 0;
+  // 候補を順に試す。403・404（その大きさは無い）なら次へ。通信の失敗・混み合い（429・5xx）は少し待ってもう一度
+  async function fetchPic(cands) {
+    const tries = [];
+    for (const u of cands) if (!tries.includes(u)) tries.push(u);
+    for (const u of cands) for (const v of variantsOf(u)) if (!tries.includes(v)) tries.push(v);
+    let last = 'gone';
+    for (const u of tries) {
+      for (let a = 0; a < 3; a++) {
+        try {
+          const res = await fetch(u, { credentials: 'omit' });
+          if (res.ok) return { blob: await res.blob(), url: u };
+          if (res.status === 429 || res.status >= 500) { last = 'net'; await sleep(1200 * (a + 1)); continue; }
+          last = 'gone'; break;
+        } catch (e) { last = 'net'; await sleep(900 * (a + 1)); }
+      }
+    }
+    throw new Error(last);
+  }
+  // createImageBitmap が読めない形式でも、img で読めれば使う
+  async function decodeAny(blob) {
+    try { return await createImageBitmap(blob); }
+    catch (e) {
+      const u = URL.createObjectURL(blob);
+      try { const im = new Image(); im.src = u; await im.decode(); return im; }
+      finally { setTimeout(() => URL.revokeObjectURL(u), 5000); }
+    }
+  }
   async function shrink(blob) {
-    const bmp = await createImageBitmap(blob);
-    const scale = Math.min(1, MAX_EDGE / Math.max(bmp.width, bmp.height));
-    const w = Math.max(1, Math.round(bmp.width * scale));
-    const h = Math.max(1, Math.round(bmp.height * scale));
+    const bmp = await decodeAny(blob);
+    const bw = bmp.width || bmp.naturalWidth, bh = bmp.height || bmp.naturalHeight;
+    const scale = Math.min(1, MAX_EDGE / Math.max(bw, bh));
+    const w = Math.max(1, Math.round(bw * scale));
+    const h = Math.max(1, Math.round(bh * scale));
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
     const ctx = c.getContext('2d');
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(bmp, 0, 0, w, h);
     const out = await new Promise(r => c.toBlob(r, TYPE, QUALITY));
-    const dim = { w: bmp.width, h: bmp.height };
+    const dim = { w: bw, h: bh };
     bmp.close && bmp.close();
     return { blob: out, ...dim };
   }
@@ -383,14 +456,18 @@
   async function worker(queue) {
     while (queue.length && !stopped) {
       const i = queue.pop();
-      const { url, section } = list[i];
+      const { cands, section } = list[i];
       try {
-        const res = await fetch(url, { credentials: 'omit' });
-        if (!res.ok) throw 0;
-        const raw = await res.blob();
-        const s = await shrink(raw);
-        got[i] = { url, section, blob: s.blob, w: s.w, h: s.h };
-      } catch (e) { failed++; }
+        const r = await fetchPic(cands);
+        let s;
+        try { s = await shrink(r.blob); } catch (e) { why.decode++; throw e; }
+        if (isSmall(r.url) && !isSmall(cands[0])) smallOnly++;
+        got[i] = { url: r.url, section, blob: s.blob, w: s.w, h: s.h };
+      } catch (e) {
+        failed++;
+        if (e && e.message === 'net') why.net++; else if (e && e.message === 'gone') why.gone++;
+        console.warn('MOOD BOARD: 取れなかった写真', cands[0], e && e.message);
+      }
       done++;
       bar.style.width = (done / list.length * 100).toFixed(1) + '%';
       sub.textContent = done + ' / ' + list.length + '　（失敗 ' + failed + '）';
@@ -514,7 +591,9 @@
     + '<br>' + report()
     + (sections.length ? '<br>セクションは MOOD BOARD の「区分け」になります' : '')
     + (trimmed ? '<br>おすすめと思われる ' + trimmed + ' 枚は除きました' : '')
-    + (failed ? '<br>（' + failed + ' 枚は取得できませんでした）' : '')
+    + (failed ? '<br>（' + failed + ' 枚は取得できませんでした：'
+      + [why.gone ? 'どの大きさの画像も無い ' + why.gone : '', why.net ? '通信の失敗 ' + why.net : '', why.decode ? '読めない形式 ' + why.decode : ''].filter(Boolean).join('・') + '）' : '')
+    + (smallOnly ? '<br>' + smallOnly + ' 枚は、小さい画像しか残っていませんでした' : '')
     + (pauses ? '<br>途中で画面が隠れて ' + pauses + ' 回止まりましたが、続きから集めました' : '')
     + (short ? '<br><b>ボードの件数より ' + short + ' 枚少ないです。</b>非公開・削除済みのピンや動画のピンは取れません。'
       + '<br>このページのまま、もう一度コードを貼って Enter すると、<b>今回の分と合わせて</b>集め直します（3日以内）' : '');
