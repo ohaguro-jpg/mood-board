@@ -1,6 +1,6 @@
 /* MOOD BOARD service worker
    アプリの殻だけキャッシュする。写真の実体は IndexedDB にあるので触らない。 */
-const CACHE = 'moodboard-v4';   // 中身を変えたら上げる（古い控えを片付ける合図）
+const CACHE = 'moodboard-v5';   // 中身を変えたら上げる（古い控えを片付ける合図）
 // Android の「共有」から受け取った写真を、アプリが開いて取り込むまで置いておく場所（殻の控えとは別。片付けない）
 const SHARE = 'moodboard-share';
 const SHELL = ['./', './index.html', './style.css', './app.js', './i18n.js', './help.js', './manifest.json',

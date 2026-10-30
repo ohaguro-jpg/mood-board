@@ -714,13 +714,89 @@ async function renderHome() {
   $('#home-stats').innerHTML = statTxt;
 }
 
-async function newBoard() {
-  const name = await ask('ボードの名前', '');
-  if (name === null) return;
-  const b = { id: uid(), name: name || '無題のボード', createdAt: nowISO(), updatedAt: nowISO() };
-  await dbPut('boards', b);
-  await openBoard(b.id);
+/* ==========================================================================
+   新しいボード：ひな形から始める（Milanote のテンプレート）  2026-10-30
+   撮影の段取り・衣装案・世界観・ロケハン。メモ（書式つき）とチェックリストと、参考写真を置く見出しが入った状態から始める。
+   写真は入らない（自分の写真を見出しの下に入れていく）
+   ========================================================================== */
+const enUI = () => !!(window.MB_I18N && MB_I18N.lang === 'en');
+const T2 = (ja, en) => enUI() ? en : ja;
+const tplMemo = (x, y, w, html, bg) => Object.assign({ type: 'text', x, y, w, h: 120, rich: html }, bg ? { bg } : {});
+const tplBullets = (title, rows) => '<div><font size="5"><b>' + escHTML(title) + '</b></font></div><ul>' + rows.map(r => '<li>' + escHTML(r) + '</li>').join('') + '</ul>';
+const tplHead = (x, y, title) => tplMemo(x, y, 270, '<div><font size="6"><b>' + escHTML(title) + '</b></font></div><div><span style="color: rgb(107, 107, 116);">'
+  + escHTML(T2('この下に参考写真を', 'Drop references below')) + '</span></div>', '#ffffff');
+const tplList = (x, y, title, rows) => ({ type: 'list', x, y, w: 250, title, rows: rows.map(t => ({ t: t.replace(/^★/, ''), must: /^★/.test(t), done: false })) });
+const tplHeads = (y, names) => names.map((n, i) => tplHead(i * 300, y, n));
+const BOARD_TEMPLATES = [
+  { id: 'blank', ja: ['白紙', '何もない状態から'], items: () => [] },
+  { id: 'shoot', ja: ['撮影の段取り', '撮影メモ・ショットリスト・持ち物・参考写真の見出し'], en: 'Shoot plan', items: () => [
+    tplMemo(0, 0, 280, tplBullets(T2('撮影メモ', 'Shoot notes'), T2(['日時：', '場所：', 'モデル：', 'カメラ：', 'スタイリング：', 'ヘアメイク：'],
+      ['Date:', 'Location:', 'Model:', 'Photographer:', 'Styling:', 'Hair & makeup:']))),
+    tplList(310, 0, T2('ショットリスト', 'Shot list'), T2(['★全身・正面', '★バストアップ', '手元のアップ', '後ろ姿', '引きの風景'],
+      ['★Full body, front', '★Bust', 'Hands close-up', 'From behind', 'Wide scene'])),
+    tplList(590, 0, T2('持ち物', 'Kit list'), T2(['衣装・小物', 'アイロン・スチーマー', '養生テープ・クリップ', 'レフ板', '予備のバッテリー'],
+      ['Wardrobe & accessories', 'Iron / steamer', 'Tape & clips', 'Reflector', 'Spare batteries'])),
+    ...tplHeads(300, T2(['ライティング', 'ポーズ', '衣装', 'ヘアメイク'], ['Lighting', 'Poses', 'Wardrobe', 'Hair & makeup'])),
+  ] },
+  { id: 'styling', ja: ['衣装案', 'テーマのメモと、トップス・ボトムス・靴と小物・ヘアメイクの見出し'], en: 'Styling', items: () => [
+    tplMemo(0, 0, 300, tplBullets(T2('テーマ', 'Theme'), T2(['キーワード：', '色：', '季節・場面：', '避けたいこと：'], ['Keywords:', 'Colors:', 'Season / scene:', 'Avoid:']))),
+    ...tplHeads(240, T2(['トップス', 'ボトムス', '靴・小物', 'アクセサリー', 'ヘアメイク'], ['Tops', 'Bottoms', 'Shoes & bags', 'Accessories', 'Hair & makeup'])),
+  ] },
+  { id: 'brand', ja: ['世界観', 'ひとことで言うと・キーワードと、色・質感・人物・場所・光の見出し'], en: 'Brand mood', items: () => [
+    tplMemo(0, 0, 320, tplBullets(T2('世界観', 'Mood'), T2(['ひとことで言うと：', '3つのキーワード：', '似ているブランド・作品：', '避けたいこと：'],
+      ['In one line:', 'Three keywords:', 'Similar brands / works:', 'Avoid:']))),
+    ...tplHeads(240, T2(['色', '質感', '人物', '場所', '光'], ['Color', 'Texture', 'People', 'Places', 'Light'])),
+  ] },
+  { id: 'location', ja: ['ロケハン', '候補地ごとのメモ（住所・光・広さ・許可）と、下見で撮るもの'], en: 'Location scout', items: () => [
+    ...['A', 'B', 'C'].map((k, i) => tplMemo(i * 300, 0, 270, tplBullets(T2('候補地 ', 'Location ') + k,
+      T2(['住所：', '光（何時ごろ）：', '広さ・天井：', '許可・料金：', '電源・控え室：'], ['Address:', 'Light (what time):', 'Space / ceiling:', 'Permit / fee:', 'Power / green room:'])))),
+    tplList(900, 0, T2('下見で撮るもの', 'Photos to take'), T2(['全体の引き', '入口', '窓と光', '電源', '控え室'], ['Wide view', 'Entrance', 'Windows & light', 'Power outlets', 'Green room'])),
+  ] },
+];
+let NB_TPL = 'blank';
+function newBoard() {
+  NB_TPL = 'blank';
+  $('#nb-name').value = '';
+  renderNbTemplates();
+  openSheet('#sheet-newboard');
+  setTimeout(() => $('#nb-name').focus(), 60);
 }
+function renderNbTemplates() {
+  const box = $('#nb-templates');
+  box.innerHTML = '';
+  BOARD_TEMPLATES.forEach(t => {
+    const b = inspEl('button', 'nb-card' + (NB_TPL === t.id ? ' on' : ''));
+    b.append(inspEl('b', '', t.ja[0]), inspEl('i', '', t.ja[1]));
+    b.onclick = () => { NB_TPL = t.id; renderNbTemplates(); };
+    b.ondblclick = () => { NB_TPL = t.id; createBoardFromSheet(); };
+    box.appendChild(b);
+  });
+}
+async function createBoardFromSheet() {
+  const t = BOARD_TEMPLATES.find(x => x.id === NB_TPL) || BOARD_TEMPLATES[0];
+  const name = $('#nb-name').value.trim() || (t.id === 'blank' ? T2('無題のボード', 'Untitled board') : T2(t.ja[0], t.en));
+  closeSheets();
+  const b = { id: uid(), name, createdAt: nowISO(), updatedAt: nowISO() };
+  await dbPut('boards', b);
+  const items = t.items().map((x, i) => {
+    const it = Object.assign({ id: uid(), boardId: b.id, z: i + 1, note: '', tags: [], addedAt: nowISO() }, x);
+    if (it.type === 'text') { const d = document.createElement('div'); d.appendChild(richFrag(it.rich)); it.text = richText(d); }
+    if (it.type === 'list') it.h = listHeight(it);
+    return it;
+  });
+  if (items.length) await dbPutMany('items', items);
+  await openBoard(b.id);
+  // メモの高さを中身に合わせる（ちょうどの大きさで並ぶように）
+  const changed = S.items.filter(it => it.type === 'text' && fitTextHeight(it, true));
+  if (changed.length) { await dbPutMany('items', changed); fitAll(true); }
+}
+$('#nb-go').onclick = () => createBoardFromSheet();
+$('#nb-cancel').onclick = closeSheets;
+$('#nb-name').addEventListener('keydown', (e) => {
+  if (imeKey(e)) return;
+  if (e.key === 'Enter') { e.preventDefault(); createBoardFromSheet(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeSheets(); }
+});
 
 /* ========================== ボードを開く ================================= */
 async function openBoard(id) {
@@ -938,6 +1014,21 @@ function applyPhotoLook(el, it) {
   if (it.imageId) {
     const mb = markBadge(S.imgs.get(it.imageId));
     if (mb) { mb.style.setProperty('--mks', Math.round(clamp(it.w * 0.13, 24, 56)) + 'px'); el.appendChild(mb); }
+  }
+  // 写真への書き込み（番号の丸）。位置は写真の中の割合。反転していれば丸も反転させる
+  const op = el.querySelector(':scope > .pins'); if (op) op.remove();
+  const pins = it.imageId ? pinsOf(S.imgs.get(it.imageId)) : [];
+  if (pins.length) {
+    const box = inspEl('div', 'pins');
+    box.style.setProperty('--pn', Math.round(clamp(it.w * 0.075, 14, 34)) + 'px');
+    pins.forEach((p, i) => {
+      const d = inspEl('i', '', String(i + 1));
+      d.style.left = ((it.flipX ? 1 - p.x : p.x) * 100) + '%';
+      d.style.top = ((it.flipY ? 1 - p.y : p.y) * 100) + '%';
+      if (p.t) d.title = p.t;
+      box.appendChild(d);
+    });
+    el.appendChild(box);
   }
 }
 
@@ -1866,6 +1957,7 @@ async function openViewer(it, opts = {}) {
   if (!rec) return toast('画像が見つかりません');
   viewerItem = it;
   if (!opts.keepList) VLIST = viewerListFor(it);   // ← → で前後へ行くための並び
+  const keepPin = !!opts.keepList && VP.on;        // 1枚ずつ送りながら書き込むときは、書き込むままにする
   // ストックから開いたときは、ボードの上の写真を変える道具（まわす・切り抜く・盤面に置く）を出さない
   $('#viewer').classList.toggle('from-stock', !!it.stock);
   resetViewerTools();
@@ -1895,6 +1987,8 @@ async function openViewer(it, opts = {}) {
   $('#viewer-meta').textContent = bits.join('  ·  ');
   syncViewerMarks();
   $('#viewer').hidden = false;
+  if (keepPin && !isVid) setPinMode(true, true);
+  renderViewerPins();
 }
 
 /* ========================== ボードへ入れる =============================== */
@@ -2324,17 +2418,23 @@ async function memoSave(final) {
   if (hasRichFormat(html)) it.rich = html; else delete it.rich;
   rebuildItemEl(it);
   // 字がはみ出したら、下へのばす（書いたばかりのメモは、中身に合わせて縮めもする）
-  const nb = itemEl(it.id) && itemEl(it.id).querySelector('.note-body');
-  if (nb) {
-    nb.style.bottom = 'auto';
-    const need = Math.ceil(nb.scrollHeight);
-    nb.style.bottom = '';
-    const nh = MEMO.fresh ? Math.max(it.style === 'bubble' ? 56 : 80, need) : Math.max(it.h, need);
-    if (Math.abs(nh - it.h) > 1) { it.h = Math.min(6000, nh); updateItemEl(it); positionHandle(); }
-  }
+  if (fitTextHeight(it, MEMO.fresh)) positionHandle();
   await dbPut('items', it);
   touchBoard();
   if (!final) $('#memo-saved').textContent = '保存しました';
+}
+/* メモの高さを中身に合わせる。shrink：中身より大きければ縮めもする（書いたばかりのメモ・ひな形）。変えたら true */
+function fitTextHeight(it, shrink) {
+  const el = itemEl(it.id), nb = el && el.querySelector('.note-body');
+  if (!nb) return false;
+  nb.style.bottom = 'auto';
+  const need = Math.ceil(nb.scrollHeight);
+  nb.style.bottom = '';
+  const nh = shrink ? Math.max(it.style === 'bubble' ? 56 : 48, need) : Math.max(it.h, need);
+  if (Math.abs(nh - it.h) <= 1) return false;
+  it.h = Math.min(6000, nh);
+  updateItemEl(it);
+  return true;
 }
 async function closeMemo() {
   if ($('#memo').hidden) return;
@@ -2692,7 +2792,7 @@ async function exportAll() {
       entries.push({ name, data: new Uint8Array(await (await realBlob(r.full)).arrayBuffer()) });
       const m = { id: r.id, w: r.w, h: r.h, srcUrl: r.srcUrl, addedAt: r.addedAt, file: name, type: r.full.type };
       // ストックのタグ・撮影データ・撮った画面の題名も持っていく（以前は落ちていた）
-      ['tags', 'exif', 'srcTitle', 'dur'].forEach(k => { if (r[k] != null && r[k] !== '') m[k] = r[k]; });
+      ['tags', 'exif', 'srcTitle', 'dur', 'pins'].forEach(k => { if (r[k] != null && r[k] !== '') m[k] = r[k]; });
       if (marksOf(r).length) m.marks = marksOf(r);
       if (isVideoRec(r)) {
         const vb = await realBlob(r.video);
@@ -2759,7 +2859,7 @@ async function importZip(file) {
       const nid = uid();
       imgMap.set(m.id, nid);
       const rec = { id: nid, full: blob, thumb, w: m.w, h: m.h, srcUrl: m.srcUrl || '', addedAt: m.addedAt || nowISO() };
-      ['tags', 'exif', 'srcTitle', 'dur'].forEach(k => { if (m[k] != null) rec[k] = m[k]; });
+      ['tags', 'exif', 'srcTitle', 'dur', 'pins'].forEach(k => { if (m[k] != null) rec[k] = m[k]; });
       const mk = (Array.isArray(m.marks) ? m.marks : (m.mark ? [m.mark] : [])).map(id => markMap.get(+id)).filter(Boolean);
       if (mk.length) rec.marks = [...new Set(mk)];
       if (m.video && byName.get(m.video)) rec.video = new Blob([byName.get(m.video).data], { type: m.videoType || 'video/mp4' });
@@ -3415,7 +3515,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && AREA.rect) { e.preventDefault(); return void $('#area-pdf').click(); }
   }
   // 1枚表示のスポイトとガイドは Esc で先に外す
-  if (!$('#viewer').hidden && e.key === 'Escape' && (VW.eyedrop || VW.guide || VW.info)) { resetViewerTools(); return; }
+  if (!$('#viewer').hidden && e.key === 'Escape' && (VW.eyedrop || VW.guide || VW.info || VP.on)) { resetViewerTools(); return; }
   if (e.key === 'Escape') {
     if (!$('#viewer').hidden) { $('#viewer').hidden = true; stopViewerVideo(); return void resetViewerTools(); }
     if (!$('#compare').hidden) return closeCompare();
@@ -3519,6 +3619,7 @@ window.addEventListener('resize', () => { if (S.view === 'board') positionHandle
   }
   loadSettings();
   await loadMarkDefs();     // しるしの名前・色（自分で変えたもの）を、描く前に読む
+  await loadStockViews();   // 保存した絞り込み
   document.body.classList.add('at-home');
   await renderHome();
   // 開発中(localhost)は登録しない。古いキャッシュを掴んで混乱するため（?sw=1 を付けたときだけ、試験のために登録する）
@@ -4585,6 +4686,7 @@ async function paintItem(ctx, it, box, opt = {}) {
       roundRectPath(ctx, x, y, w, h, radius); ctx.clip();
       ctx.globalAlpha = alpha;
       ctx.drawImage(pc, x, y, w, h);
+      if (opt.pins !== false) drawPinsOnCanvas(ctx, it, x, y, w, h);
       if (opt.note !== false && it.note) {
         const gh = 46 * sc;
         const g = ctx.createLinearGradient(0, y + h - gh, 0, y + h);
@@ -5953,15 +6055,19 @@ async function exportBoardPDF(mode, opts = {}) {
         await makePage(async (ctx, W, H) => {
           await drawPdfHeader(ctx, W, margin, title, (i + 1) + ' / ' + items.length);
           const top = margin + Math.round(px * 0.05);
-          const box = { x: margin, y: top, w: W - margin * 2, h: H - top - margin - Math.round(px * 0.06) };
+          // 写真への書き込み（① 袖のふくらみ …）は、写真の下に1つ1行で。そのぶん写真を小さくする
+          const fs = Math.round(px * 0.018), lh = Math.round(fs * 1.55);
+          ctx.font = fs + 'px -apple-system,"Hiragino Sans",sans-serif';
+          const pinLines = it.imageId ? pinsOf(pinRecOf(it.imageId)).map((p, k) => p.t ? PIN_NO(k) + ' ' + p.t : '').filter(Boolean)
+            .flatMap(t => wrapCanvasText(ctx, t, W - margin * 2)).slice(0, 12) : [];
+          const box = { x: margin, y: top, w: W - margin * 2, h: H - top - margin - Math.round(px * 0.06) - pinLines.length * lh };
           await drawItemInto(ctx, it, box);
           const cap = [it.note, (it.tags || []).join(' / ')].filter(Boolean).join('   ');
-          if (cap) {
-            ctx.fillStyle = '#444';
-            ctx.font = Math.round(px * 0.018) + 'px -apple-system,"Hiragino Sans",sans-serif';
-            ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-            ctx.fillText(cap, margin, H - margin);
-          }
+          ctx.fillStyle = '#444';
+          ctx.font = fs + 'px -apple-system,"Hiragino Sans",sans-serif';
+          ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+          if (cap) ctx.fillText(cap, margin, H - margin, W - margin * 2);
+          pinLines.forEach((t, k) => ctx.fillText(t, margin, H - margin - (cap ? lh : 0) - (pinLines.length - 1 - k) * lh));
         });
         await new Promise(r => setTimeout(r, 0));
       }
@@ -6284,13 +6390,14 @@ async function runTool(tool) {
     case 'lock': closeSheets(); return toggleLock(t);
     case 'front': case 'back': closeSheets(); return reorder(t, tool);
     case 'tail': closeSheets(); return cycleTail(t);
-    case 'crop': case 'eyedrop': case 'guide': case 'info': {
+    case 'crop': case 'eyedrop': case 'guide': case 'info': case 'pin': {
       // 写真用の道具（1枚表示でも、動画のときは出していない）。選んだ中の最初の「写真」にかける
       const still = photos.find(it => !isVideoRec(S.imgs.get(it.imageId)));
       if (!still) return toast('動画には使えません。写真を選んでください');
       closeSheets(); await openViewer(still);
       if (tool === 'crop') return $('#viewer-crop').click();
       if (tool === 'eyedrop') return setEyedrop(true);
+      if (tool === 'pin') return setPinMode(true);
       return tool === 'guide' ? cycleGuide() : toggleInfo(true);
     }
     case 'harmony': return openHarmony(t);
@@ -6818,6 +6925,151 @@ $('#present-close').onclick = stopPresent;
 })();
 document.addEventListener('fullscreenchange', () => { if (PR && !document.fullscreenElement) { /* 全画面だけ抜けたときはそのまま */ } });
 
+/* ==========================================================================
+   写真への書き込み（Eagle の注釈）  2026-10-30
+   1枚表示の「書き込む」で、写真のここ（袖・光・質感など）に番号つきの印と一言を付ける。
+   写真そのもの（images の記録の pins：{x, y（写真の中の割合）, t}）に付けるので、どのボード・ストックでも同じ。
+   盤面では番号の丸、PDF・画像・プレゼンにも番号の丸が出て、1枚ずつの PDF には一言も出る
+   ========================================================================== */
+const VP = { on: false, edit: -1, fresh: false };
+const PIN_NO = (i) => i < 20 ? String.fromCharCode(0x2460 + i) : '(' + (i + 1) + ')';
+const pinsOf = (rec) => (rec && Array.isArray(rec.pins)) ? rec.pins.filter(p => p && isFinite(p.x) && isFinite(p.y)) : [];
+const pinRecOf = (imageId) => S.imgs.get(imageId) || STOCK.all.find(r => r.id === imageId) || null;
+async function savePins(imageId, pins) {
+  const r = pinRecOf(imageId) || await dbGet('images', imageId);
+  if (!r) return;
+  // 盤面とストックが別々に持っている同じ写真の記録も、そろえておく
+  for (const c of new Set([r, S.imgs.get(imageId), STOCK.all.find(x => x.id === imageId)])) {
+    if (!c) continue;
+    if (pins.length) c.pins = pins.map(p => ({ x: Math.round(p.x * 10000) / 10000, y: Math.round(p.y * 10000) / 10000, t: p.t || '' }));
+    else delete c.pins;
+  }
+  await dbPut('images', r);
+  canvas.querySelectorAll('.item.photo-item').forEach(el => {
+    const it = S.items.find(i => i.id === el.dataset.id);
+    if (it && it.imageId === imageId) applyPhotoLook(el, it);
+  });
+  if (!$('#inspector').hidden) renderInspector(true);
+}
+function drawPinsOnCanvas(ctx, it, x, y, w, h) {
+  const pins = it.imageId ? pinsOf(pinRecOf(it.imageId)) : [];
+  if (!pins.length) return;
+  const r = Math.max(5, Math.min(w, h) * 0.035);
+  ctx.save();
+  pins.forEach((p, i) => {
+    const px = x + (it.flipX ? 1 - p.x : p.x) * w, py = y + (it.flipY ? 1 - p.y : p.y) * h;
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#ff5a36'; ctx.fill();
+    ctx.lineWidth = Math.max(1, r * 0.2); ctx.strokeStyle = '#ffffff'; ctx.stroke();
+    ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '700 ' + Math.round(r * 1.1) + 'px -apple-system,"Hiragino Sans",sans-serif';
+    ctx.fillText(String(i + 1), px, py + r * 0.06);
+  });
+  ctx.restore();
+}
+const vpRec = () => (viewerItem && viewerItem.imageId) ? pinRecOf(viewerItem.imageId) : null;
+/* 1枚表示の上に、番号の丸と一言を並べる（写真が画面のどこに映っているかから位置を出す） */
+function renderViewerPins() {
+  const box = $('#viewer-pins');
+  box.innerHTML = '';
+  if ($('#viewer').hidden || !viewerItem || $('#viewer').classList.contains('is-video')) return;
+  const pins = pinsOf(vpRec());
+  const img = $('#viewer-img');
+  if (!pins.length || !img.naturalWidth) return;
+  const R = viewerImageRect(), sw = $('#viewer-stage').clientWidth;
+  pins.forEach((p, i) => {
+    const x = R.x + p.x * R.w, y = R.y + p.y * R.h;
+    const b = inspEl('button', 'vpin', String(i + 1));
+    b.style.left = x + 'px'; b.style.top = y + 'px';
+    if (p.t) b.title = p.t;
+    b.onclick = (e) => { e.stopPropagation(); openPinEdit(i, false); };
+    box.appendChild(b);
+    if (!p.t) return;
+    const t = inspEl('span', 'vpin-t', p.t);
+    t.style.top = y + 'px';
+    if (x < sw * 0.62) t.style.left = (x + 20) + 'px'; else { t.style.right = (sw - x + 20) + 'px'; }
+    t.onclick = (e) => { e.stopPropagation(); openPinEdit(i, false); };
+    box.appendChild(t);
+  });
+}
+function setPinMode(on, quiet) {
+  if (on && $('#viewer').classList.contains('is-video')) return toast('動画には書き込めません');
+  if (!on && VP.edit >= 0) closePinEdit(true);
+  VP.on = on;
+  $('#viewer').classList.toggle('pinning', on);
+  $('#viewer-pin-btn').classList.toggle('on', on);
+  if (on && VW.eyedrop) setEyedrop(false);
+  if (on && !quiet) toast('写真の、書き込みたいところを押してください', 2400);
+}
+function openPinEdit(i, fresh) {
+  const p = pinsOf(vpRec())[i];
+  if (!p) return;
+  VP.edit = i; VP.fresh = !!fresh;
+  const ed = $('#vpin-edit');
+  $('#vpin-no').textContent = PIN_NO(i);
+  $('#vpin-text').value = p.t || '';
+  ed.hidden = false;
+  const R = viewerImageRect(), st = $('#viewer-stage');
+  const x = R.x + p.x * R.w, y = R.y + p.y * R.h;
+  ed.style.left = clamp(x - ed.offsetWidth / 2, 8, st.clientWidth - ed.offsetWidth - 8) + 'px';
+  ed.style.top = (y + 22 + ed.offsetHeight > st.clientHeight - 8 ? Math.max(8, y - 22 - ed.offsetHeight) : y + 22) + 'px';
+  setTimeout(() => { $('#vpin-text').focus(); $('#vpin-text').select(); }, 30);
+}
+/* save：OK（⏎）＝言葉を保存。やめる（Esc）＝そのまま。打ったばかりの印をやめたら、印ごと消す */
+async function closePinEdit(save, remove) {
+  const i = VP.edit;
+  if (i < 0) return;
+  VP.edit = -1;
+  $('#vpin-edit').hidden = true;
+  const pins = pinsOf(vpRec()).slice();
+  if (!pins[i]) return;
+  if (remove || (!save && VP.fresh)) pins.splice(i, 1);
+  else if (save) pins[i] = Object.assign({}, pins[i], { t: $('#vpin-text').value.trim().slice(0, 200) });
+  else { VP.fresh = false; return renderViewerPins(); }
+  VP.fresh = false;
+  await savePins(viewerItem.imageId, pins);
+  renderViewerPins();
+}
+$('#viewer-pin-btn').onclick = (e) => { e.stopPropagation(); setPinMode(!VP.on); };
+$('#vpin-ok').onclick = (e) => { e.stopPropagation(); closePinEdit(true); };
+$('#vpin-del').onclick = (e) => { e.stopPropagation(); closePinEdit(false, true); };
+$('#vpin-edit').addEventListener('click', (e) => e.stopPropagation());
+$('#vpin-text').addEventListener('keydown', (e) => {
+  if (imeKey(e)) return;
+  if (e.key === 'Enter') { e.preventDefault(); closePinEdit(true); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePinEdit(false); }
+});
+$('#viewer-img').addEventListener('load', renderViewerPins);
+window.addEventListener('resize', () => { if (!$('#viewer').hidden) renderViewerPins(); });
+$('#viewer-stage').addEventListener('click', async (e) => {
+  if (!VP.on || VW.eyedrop) return;
+  if (e.target.closest('#vpin-edit, .vpin, .vpin-t, #viewer-marks, .viewer-step, #viewer-info, #viewer-pick')) return;
+  if (VP.edit >= 0) return closePinEdit(true);          // 書いている途中で外を押したら、まず保存して閉じる
+  const R = viewerImageRect();
+  const lx = e.clientX - R.sl - R.x, ly = e.clientY - R.stp - R.y;
+  if (lx < 0 || ly < 0 || lx > R.w || ly > R.h) return;
+  const pins = pinsOf(vpRec()).slice();
+  pins.push({ x: lx / R.w, y: ly / R.h, t: '' });
+  await savePins(viewerItem.imageId, pins);
+  renderViewerPins();
+  openPinEdit(pins.length - 1, true);
+});
+/* 右のパネル：この写真の書き込み */
+function inspPinBlock(body, it) {
+  const rec = S.imgs.get(it.imageId);
+  if (!rec || isVideoRec(rec)) return;
+  const pins = pinsOf(rec);
+  const s = inspSec(body, '書き込み', '写真のここに印と一言');
+  if (pins.length) {
+    const ul = inspEl('div', 'pin-list');
+    pins.forEach((p, i) => ul.appendChild(inspEl('div', '', PIN_NO(i) + ' ' + (p.t || '…'))));
+    s.appendChild(ul);
+  }
+  const b = inspEl('button', 'chip', pins.length ? '書き込みを直す' : '写真に書き込む');
+  b.onclick = async () => { await openViewer(it); setPinMode(true); };
+  s.appendChild(b);
+}
+
 /* ---------- 1枚表示の道具：スポイト・構図ガイド・撮影データ ---------- */
 let VW = { eyedrop: false, guide: 0, info: false, pixels: null, pixelsFor: null, picked: null };
 function viewerImageRect() {
@@ -6830,6 +7082,8 @@ function viewerImageRect() {
 }
 function resetViewerTools() {
   VW.eyedrop = false; VW.guide = 0; VW.info = false; VW.picked = null;
+  VP.on = false; VP.edit = -1; VP.fresh = false;
+  $('#viewer').classList.remove('pinning'); $('#viewer-pin-btn').classList.remove('on'); $('#vpin-edit').hidden = true;
   $('#viewer-pick').hidden = true; $('#viewer-guide').hidden = true; $('#viewer-info').hidden = true;
   $('#viewer').classList.remove('eyedrop');
   $('#viewer-eyedrop').classList.remove('on'); $('#viewer-info-btn').classList.remove('on');
@@ -7219,6 +7473,7 @@ function buildInspOne(body, it) {
   acts.appendChild(inspAction('はずす', INSP_ICON.trash, () => $('#btn-item-remove').click(), true));
   body.appendChild(acts);
   if (photo) inspMarkBlock(body, [it]);
+  if (photo) inspPinBlock(body, it);
 
   // ひとこと・説明（写真と色見本）
   if (photo || kind === 'color') {
@@ -7681,6 +7936,38 @@ async function loadStock() {
 function renderStockFilters() {
   const box = $('#stock-filters');
   box.innerHTML = '';
+  // 保存した絞り込み（いまの条件と同じものは押した状態。押した状態でもう一度押すと全部に戻す。× で消す）
+  const now = stockNow();
+  SVIEWS.forEach(v => {
+    const on = sameStockView(v, now);
+    const c = inspEl('button', 'chip sv' + (on ? ' on' : ''));
+    c.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 6.5h6.5l2 2H21V19H3z"/></svg>';
+    c.appendChild(inspEl('span', '', v.name));
+    c.title = stockViewName(v);
+    c.onclick = () => applyStockView(on ? { filter: 'all', sort: 'new' } : v);
+    if (on) {
+      const x = inspEl('i', 'sv-x', '×'); x.title = 'この絞り込みを消す';
+      x.onclick = async (e) => {
+        e.stopPropagation();
+        if (!await confirmAsk('「' + v.name + '」の絞り込みを消しますか？（写真は消えません）')) return;
+        SVIEWS = SVIEWS.filter(z => z !== v); await saveStockViews(); renderStockFilters();
+      };
+      c.appendChild(x);
+    }
+    box.appendChild(c);
+  });
+  if (!stockIsPlain(now) && !SVIEWS.some(v => sameStockView(v, now))) {
+    const c = inspEl('button', 'chip sv-add', '＋ この絞り込みを保存');
+    c.title = 'いまの しるし・タグ・色・形・並び・さがす言葉 を、名前を付けて保存します';
+    c.onclick = async () => {
+      const name = await ask('この絞り込みの名前（ストックのいちばん上に並びます）', stockViewName(now));
+      if (!name) return;
+      SVIEWS.push(Object.assign({ id: uid(), name: name.slice(0, 30) }, now));
+      await saveStockViews(); renderStockFilters();
+      toast('「' + name.slice(0, 30) + '」を保存しました', 1600);
+    };
+    box.appendChild(c);
+  }
   const loose = STOCK.all.filter(r => STOCK.info.get(r.id).loose).length;
   const tagCount = new Map();
   STOCK.all.forEach(r => STOCK.info.get(r.id).tags.forEach(t => tagCount.set(t, (tagCount.get(t) || 0) + 1)));
@@ -7716,9 +8003,13 @@ function applyStockFilter() {
     if (STOCK.filter.startsWith('mark:') && !marksOf(r).includes(+STOCK.filter.slice(5))) return false;
     if (STOCK.shape && shapeOf(r) !== STOCK.shape) return false;
     if (STOCK.color && !colorMatch(r, STOCK.color)) return false;
-    return words.every(w => inf.text.includes(w));
+    if (!words.length) return true;
+    // しるしの名前でもさがせる（「衣装 春」のように2つ重ねて絞れる）
+    const mt = marksOf(r).map(id => markDef(id).name.toLowerCase()).join(' ');
+    return words.every(w => inf.text.includes(w) || mt.includes(w));
   });
   STOCK.list = sortStock(STOCK.list);
+  renderStockFilters();       // 「＋ この絞り込みを保存」と、押した状態を合わせる
   const n = STOCK.all.length;
   $('#stock-lead').textContent = !n ? '' :
     (STOCK.list.length === n ? n + ' 枚' : STOCK.list.length + ' / ' + n + ' 枚') + '　押して選ぶ・ダブルクリックで大きく見る';
@@ -8155,6 +8446,47 @@ $('#viewer-next').onclick = (e) => { e.stopPropagation(); viewerStep(1); };
   });
   st.addEventListener('pointercancel', () => { sw = null; });
 })();
+
+/* ==========================================================================
+   保存した絞り込み（Eagle のスマートフォルダ）  2026-10-30
+   ストックの絞り込み（しるし・タグ・ボードに無い・動画）・並び・形・色・さがす言葉 を、名前を付けて保存して1回で呼び出す。
+   保存するのは条件だけなので、あとから写真が増えても自動で入る。置き場所はライブラリの meta 'stockViews'
+   ========================================================================== */
+let SVIEWS = [];
+async function loadStockViews() {
+  try { const m = await dbGet('meta', 'stockViews'); if (m && Array.isArray(m.list)) SVIEWS = m.list.filter(v => v && v.name); } catch (e) { }
+}
+const saveStockViews = () => dbPut('meta', { key: 'stockViews', list: SVIEWS, updatedAt: nowISO() }).catch(() => toast('保存できませんでした'));
+const stockNow = () => ({ filter: STOCK.filter || 'all', sort: STOCK.sort === 'similar' ? 'new' : (STOCK.sort || 'new'),
+  shape: STOCK.shape || '', color: STOCK.color || '', q: (STOCK.q || '').trim() });
+const stockIsPlain = (v) => v.filter === 'all' && v.sort === 'new' && !v.shape && !v.color && !v.q;
+const sameStockView = (a, b) => ['filter', 'sort', 'shape', 'color', 'q'].every(k => (a[k] || '') === (b[k] || '')) && (a.sort || 'new') === (b.sort || 'new');
+/* 条件から名前の案を作る（例：本命・青・縦長） */
+function stockViewName(v) {
+  const bits = [];
+  const f = v.filter || 'all';
+  if (f.startsWith('mark:')) { const d = markDef(+f.slice(5)); if (d) bits.push(d.name); }
+  else if (f.startsWith('tag:')) bits.push(f.slice(4));
+  else if (f === 'loose') bits.push('ボードに無い');
+  else if (f === 'video') bits.push('動画');
+  if (v.color) { const c = STOCK_COLORS.find(x => x[0] === v.color); if (c) bits.push(c[1]); }
+  if (v.shape) bits.push({ tall: '縦長', wide: '横長', square: '正方形' }[v.shape] || '');
+  if (v.q) bits.push(v.q);
+  if (v.sort && v.sort !== 'new') bits.push({ old: '古い順', mark: 'しるし順', color: '色の順', random: 'ランダム' }[v.sort] || '');
+  return bits.filter(Boolean).join('・') || '絞り込み';
+}
+async function applyStockView(v) {
+  const f = v.filter || 'all';
+  const ok = f === 'all' || f === 'loose' || f === 'video' || f.startsWith('tag:') || (f.startsWith('mark:') && !!markDef(+f.slice(5)));
+  if ((v.color || v.sort === 'color') && !(await ensureStockColors())) return;
+  STOCK.filter = ok ? f : 'all';
+  STOCK.sort = v.sort || 'new'; STOCK.simRef = null;
+  if (STOCK.sort === 'random') STOCK.seed = (Date.now() % 2147483647) || 1;
+  STOCK.shape = v.shape || ''; STOCK.color = v.color || null;
+  STOCK.q = v.q || ''; $('#stock-q').value = STOCK.q;
+  syncStockTools(); applyStockFilter();
+  $('#home-scroll').scrollTop = 0;
+}
 
 /* ==========================================================================
    ストックの並べ替え・絞り込み（Eagle：色・形・評価／mymind：ふと見返す・近い雰囲気）  2026-10-27
